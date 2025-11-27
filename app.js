@@ -127,6 +127,8 @@
   // Ace Editor placeholder — will be initialized after Ace loads
   let editor = null
   let buildOutlineFn = null
+  // global problems/errors list so various tools can push diagnostics
+  let errors = []
 
   function ensureAceLoaded(cb){
     if(window.ace){ return cb() }
@@ -135,19 +137,70 @@
     s.onload = ()=> cb()
     s.onerror = ()=>{
       console.error('Failed to load Ace editor')
-      alert('Failed to load the editor. Check your internet connection.')
+      try{ showDialog('Error','Failed to load the editor. Check your internet connection.') }catch(e){ console.error('Modal unavailable') }
     }
     document.head.appendChild(s)
   }
+
+  // Generic dialog helpers (returns Promises)
+  function showDialog(title, message, {showCancel=false} = {}){
+    return new Promise((resolve)=>{
+      const modal = document.getElementById('dialog-modal')
+      const titleEl = document.getElementById('dialog-title')
+      const body = document.getElementById('dialog-body')
+      const ok = document.getElementById('dialog-ok')
+      const cancel = document.getElementById('dialog-cancel')
+      const close = document.getElementById('dialog-close')
+      if(!modal || !titleEl || !body) { alert(message); return resolve(false) }
+      titleEl.textContent = title || ''
+      body.innerHTML = message || ''
+      modal.style.display = 'flex'
+      cancel.style.display = showCancel? '' : 'none'
+      const cleanup = (val)=>{ modal.style.display = 'none'; ok.removeEventListener('click', onOk); cancel.removeEventListener('click', onCancel); close.removeEventListener('click', onCancel); resolve(val) }
+      const onOk = ()=> cleanup(true)
+      const onCancel = ()=> cleanup(false)
+      ok.addEventListener('click', onOk)
+      cancel.addEventListener('click', onCancel)
+      close.addEventListener('click', onCancel)
+    })
+  }
+
+  function showConfirm(title, message){ return showDialog(title, message, {showCancel:true}) }
+
 
   function setupEditor(){
     editor = ace.edit('editor')
     editor.setTheme('ace/theme/monokai')
     editor.setOptions({fontSize:14, showPrintMargin:false})
     editor.session.setMode('ace/mode/html')
+    // Bind editor keys to open the custom search panel and navigate matches
+    try{
+      editor.commands.addCommand({
+        name: 'openCustomSearch',
+        bindKey: {win: 'Ctrl-F', mac: 'Command-F'},
+        exec: function() {
+          const panel = document.getElementById('search-panel')
+          const input = document.getElementById('search-input')
+          if(panel){ panel.style.display = ''; if(input){ input.focus(); input.select(); } }
+        }
+      })
+      editor.commands.addCommand({
+        name: 'nextCustomSearch',
+        bindKey: {win: 'Ctrl-G', mac: 'Command-G'},
+        exec: function(){ window.dispatchEvent(new KeyboardEvent('keydown', {key:'g', ctrlKey:true, metaKey:false})) }
+      })
+      editor.commands.addCommand({
+        name: 'prevCustomSearch',
+        bindKey: {win: 'Ctrl-Shift-G', mac: 'Command-Shift-G'},
+        exec: function(){ window.dispatchEvent(new KeyboardEvent('keydown', {key:'g', ctrlKey:true, shiftKey:true, metaKey:false})) }
+      })
+    }catch(e){ /* ignore if commands fail */ }
     // update cursor status when moving
     editor.getSession().on('change', ()=> updateCursorStatus())
     editor.selection.on('changeCursor', updateCursorStatus)
+    // keep menu items in sync with selection state
+    try{ editor.getSession().on('change', ()=> { if(typeof updateMenuConditionals === 'function') updateMenuConditionals() }) }catch(e){}
+    try{ editor.selection.on('changeSelection', ()=> { if(typeof updateMenuConditionals === 'function') updateMenuConditionals() }) }catch(e){}
     // setup outline (simple AST-ish outline for HTML/JS)
     try{
       const outlineEl = document.getElementById('outline-sidebar') || document.getElementById('outline-list')
@@ -163,14 +216,23 @@
             if(m){ items.push({label: m[2].replace(/<[^>]+>/g,''), line: i}) }
           })
         }else if(active && (active.endsWith('.js') || active.endsWith('.ts'))){
-          // find function and class declarations
+          // find function and class declarations (improved patterns)
           lines.forEach((ln, i)=>{
             let m = ln.match(/function\s+([a-zA-Z0-9_\$]+)\s*\(/)
-            if(m) { items.push({label: 'fn ' + m[1], line: i}); return }
+            if(m) { items.push({label: 'fn ' + m[1] + ' (line ' + (i+1) + ')', line: i}); return }
             m = ln.match(/class\s+([A-Z_a-z0-9\$]+)/)
-            if(m) { items.push({label: 'class ' + m[1], line: i}); return }
-            m = ln.match(/([a-zA-Z0-9_\$]+)\s*=\s*\([^)]*\)\s*=>/) // arrow fn
-            if(m) { items.push({label: 'fn ' + m[1], line: i}); return }
+            if(m) { items.push({label: 'class ' + m[1] + ' (line ' + (i+1) + ')', line: i}); return }
+            m = ln.match(/(?:const|let|var)\s+([a-zA-Z0-9_\$]+)\s*=\s*function\s*\(/)
+            if(m) { items.push({label: 'fn ' + m[1] + ' (line ' + (i+1) + ')', line: i}); return }
+            m = ln.match(/(?:const|let|var)\s+([a-zA-Z0-9_\$]+)\s*=\s*\([^\)]*\)\s*=>/) // arrow fn
+            if(m) { items.push({label: 'fn ' + m[1] + ' (line ' + (i+1) + ')', line: i}); return }
+            m = ln.match(/export\s+default\s+function\s*([a-zA-Z0-9_\$]*)/)
+            if(m) { items.push({label: 'export default ' + (m[1]||'') + ' (line ' + (i+1) + ')', line: i}); return }
+            m = ln.match(/export\s+(?:function|class)\s+([a-zA-Z0-9_\$]+)/)
+            if(m) { items.push({label: 'export ' + m[1] + ' (line ' + (i+1) + ')', line: i}); return }
+            // show TODOs inline in outline as lightweight indicators
+            m = ln.match(/\b(TODO|FIXME)\b[:\s-]*(.*)/i)
+            if(m) { items.push({label: m[1].toUpperCase() + ': ' + (m[2]||'').trim() + ' (line ' + (i+1) + ')', line: i}); return }
           })
         } else {
           // fallback: show top-level tags
@@ -194,7 +256,7 @@
           outlineEl.appendChild(el)
         })
       }
-      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate() })
+      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate(); debouncedLint() })
       // expose buildOutline for openFile to refresh outline immediately
       buildOutlineFn = buildOutline
       editor.selection.on('changeCursor', ()=> {})
@@ -212,13 +274,11 @@
   }
 
   // update dirty indicators when editor content changes
-  function scheduleDirtyUpdate(){
-    if(!editor) return
-    debounce(()=>{
-      renderTabs()
-      renderFileList()
-    }, 120)()
-  }
+  // create a single debounced updater so repeated calls debounce correctly
+  const debouncedDirtyUpdate = debounce(()=>{ renderTabs(); renderFileList() }, 120)
+  function scheduleDirtyUpdate(){ if(editor) debouncedDirtyUpdate() }
+  // debounced lint-on-type
+  const debouncedLint = debounce(()=>{ try{ if(settings.lintOnType) runLint() }catch(e){} }, 800)
 
   // storage helpers
   function loadFromStorage(){
@@ -232,43 +292,206 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(files))
   }
 
+  // Settings persistence: remembers UI options like word wrap, autoRefresh, ui-scale and bottom height
+  const SETTINGS_KEY = 'mini_vsc_settings_v1'
+  let settings = { wordWrap: false, autoRefresh: false, uiScale: 1, lintOnSave: true, lintOnType: true }
+  function loadSettings(){
+    try{ const s = localStorage.getItem(SETTINGS_KEY); if(s) settings = Object.assign(settings, JSON.parse(s)) }catch(e){}
+  }
+  function saveSettings(){
+    try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateStatus('Settings saved') }catch(e){ console.error('saveSettings', e) }
+  }
+  function applySettings(){
+    try{
+      // word wrap
+      if(editor && editor.getSession){ editor.getSession().setUseWrapMode(!!settings.wordWrap) }
+      // auto refresh
+      autoRefresh = !!settings.autoRefresh
+      // ui scale
+      try{ document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale || 1)) }catch(e){}
+      // bottom panel height restored elsewhere
+    }catch(e){ console.error('applySettings', e) }
+  }
+
   // UI helpers
   function renderFileList(){
     fileListEl.innerHTML = ''
     Object.keys(files).forEach(name=>{
       const li = document.createElement('li')
       li.dataset.name = name
-      // icon
+      li.tabIndex = 0
+
+      // left-side (icon + label)
+      const left = document.createElement('div')
+      left.style.display = 'flex'
+      left.style.alignItems = 'center'
+      left.style.flex = '1'
+
       const ico = document.createElement('span')
+      ico.className = 'file-icon'
       ico.style.marginRight = '8px'
       ico.style.opacity = '0.95'
       ico.style.width = '20px'
       ico.style.display = 'inline-block'
       ico.style.textAlign = 'center'
-      // insert SVG icon markup
       try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
-      // label
-      const label = document.createElement('span')
-      label.textContent = name
-      label.style.flex = '1'
-      label.style.cursor = 'pointer'
-      label.addEventListener('click', ()=> openFile(name))
-      li.appendChild(ico)
-      li.appendChild(label)
+
+      const nameSpan = document.createElement('span')
+      nameSpan.textContent = name
+      nameSpan.style.flex = '1'
+      nameSpan.style.cursor = 'pointer'
+      nameSpan.addEventListener('click', ()=> openFile(name))
+      nameSpan.addEventListener('dblclick', (e)=>{ e.stopPropagation(); startRename(name) })
+
+      left.appendChild(ico)
+      left.appendChild(nameSpan)
+      li.appendChild(left)
+
       // delete button
       const del = document.createElement('button')
       del.className = 'btn-close small'
       del.title = 'Delete file'
-      del.textContent = '🗑'
+      del.innerHTML = '<span class="msr">delete</span>'
       del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(name) })
       li.appendChild(del)
-      // show dirty marker if file differs from saved version
+
+      // show dirty indicator if file differs from saved version
       const dirty = (name === active && editor) ? (editor.getValue() !== (files[name]||'')) : false
-      if(dirty) label.textContent = name + ' *'
+      if(dirty){
+        const d = document.createElement('span')
+        d.className = 'dirty-indicator'
+        d.title = 'Unsaved changes'
+        nameSpan.appendChild(d)
+      }
+
       if(name === active) li.classList.add('active')
       fileListEl.appendChild(li)
     })
   }
+
+  // Inline create: insert an input at top of file list for naming the new file
+  // This unified implementation avoids modal dialogs on blur (which could
+  // cause focus/blur loops) and provides an inline error message instead.
+  function startCreateFile(){
+    const list = document.getElementById('file-list')
+    if(!list) return
+    const li = document.createElement('li')
+    li.className = 'creating'
+    const ico = document.createElement('span')
+    ico.className = 'file-icon'
+    ico.style.marginRight = '8px'
+    ico.style.width = '20px'
+    ico.style.display = 'inline-block'
+    ico.style.textAlign = 'center'
+    ico.innerHTML = `<span class="msr">insert_drive_file</span>`
+    li.appendChild(ico)
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.placeholder = 'filename.ext'
+    input.style.flex = '1'
+    input.style.padding = '6px 8px'
+    input.style.borderRadius = '6px'
+    input.style.border = '1px solid rgba(255,255,255,0.04)'
+    input.style.background = 'rgba(255,255,255,0.02)'
+    input.style.color = 'var(--muted)'
+    li.appendChild(input)
+    const err = document.createElement('div')
+    err.style.color = '#ff6b6b'
+    err.style.fontSize = '12px'
+    err.style.marginTop = '6px'
+    err.style.display = 'none'
+    li.appendChild(err)
+    list.insertBefore(li, list.firstChild)
+    input.focus(); input.select()
+
+    function cleanup(){ if(li && li.parentNode) li.parentNode.removeChild(li) }
+
+    function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
+
+    function commit(){
+      let name = (input.value || '').trim()
+      if(!name){ cleanup(); return }
+      // auto-append default extension if user omitted one
+      if(!/\.[a-z0-9]+$/i.test(name)) name += '.html'
+      // case-insensitive existence check
+      const existsKey = Object.keys(files).find(k => k.toLowerCase() === name.toLowerCase())
+      if(existsKey){
+        const listEl = document.getElementById('file-list')
+        const found = listEl && Array.from(listEl.querySelectorAll('li')).find(li=> li.dataset && li.dataset.name && li.dataset.name.toLowerCase() === existsKey.toLowerCase())
+        if(found && found.offsetParent !== null){ cleanup(); openFile(existsKey); return }
+        showInlineError('A file named "' + name + '" already exists.')
+        return
+      }
+      // create file
+      files[name] = ''
+      saveToStorage()
+      renderFileList()
+      openFile(name)
+    }
+
+    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') commit(); else if(e.key==='Escape'){ cleanup() } })
+    // On blur we cancel the inline create to avoid focus/blur loops with modals.
+    input.addEventListener('blur', ()=> { setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
+  }
+
+  // Start inline rename of a file (blur-safe, inline errors)
+  function startRename(oldName){
+    const li = Array.from(document.querySelectorAll('#file-list li')).find(x=> x.dataset && x.dataset.name === oldName)
+    if(!li) return
+    const label = li.querySelector('span:nth-child(2)')
+    const cur = oldName
+    const input = document.createElement('input')
+    input.value = cur
+    input.style.flex = '1'
+    input.style.padding = '6px'
+    input.style.borderRadius = '6px'
+    input.style.border = '1px solid rgba(255,255,255,0.04)'
+    const err = document.createElement('div')
+    err.style.color = '#ff6b6b'
+    err.style.fontSize = '12px'
+    err.style.marginTop = '6px'
+    err.style.display = 'none'
+    li.replaceChild(input, label)
+    li.insertBefore(err, input.nextSibling)
+    input.focus(); input.select()
+
+    function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
+    function revert(){ li.replaceChild(label, input); if(err && err.parentNode) err.parentNode.removeChild(err) }
+
+    const finish = ()=>{
+      const raw = input.value.trim()
+      if(!raw){ revert(); return }
+      let safe = raw.replace(/\\/g,'/').split('/').pop()
+      if(!/\.[a-z0-9]+$/i.test(safe)){
+        const origExt = (oldName && oldName.split('.').pop()) || ''
+        if(origExt) safe = safe + '.' + origExt
+      }
+      if(safe === oldName){ revert(); return }
+      const existsKey = Object.keys(files).find(k => k.toLowerCase() === safe.toLowerCase())
+      if(safe.toLowerCase() !== oldName.toLowerCase() && existsKey){
+        const list = document.getElementById('file-list')
+        const found = list && Array.from(list.querySelectorAll('li')).find(li=> li.dataset && li.dataset.name && li.dataset.name.toLowerCase() === existsKey.toLowerCase())
+        if(found && found.offsetParent !== null){ revert(); openFile(existsKey); return }
+        showInlineError('A file named "' + safe + '" already exists.')
+        return
+      }
+      files[safe] = files[oldName]
+      delete files[oldName]
+      const ti = tabs.indexOf(oldName)
+      if(ti>=0) tabs[ti] = safe
+      if(active === oldName) active = safe
+      saveToStorage()
+      if(err && err.parentNode) err.parentNode.removeChild(err)
+      renderFileList(); renderTabs();
+    }
+
+    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') finish(); else if(e.key==='Escape'){ revert() } })
+    input.addEventListener('blur', ()=> { setTimeout(()=>{ if(document.activeElement !== input) finish() }, 120) })
+  }
+
+  // Keep references to the inline implementations (these appear earlier)
+  try{ if(typeof startCreateFile === 'function') var startCreateFileInline = startCreateFile }catch(e){}
+  try{ if(typeof startRename === 'function') var startRenameInline = startRename }catch(e){}
 
   function iconFor(name){
     if(name.endsWith('.html')) return svgIcon('html')
@@ -282,17 +505,18 @@
     // small 16x16 SVG icons
     const common = 'width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"'
     switch(type){
-      case 'html': return `<svg ${common}><path d="M3 4v16h18V4H3zm16 2v2H5V6h14zM7 18l1.2-1.2L9.4 18 11 16.4 9.6 15 11 13.6 9.4 12 7 14.4V18z" fill="#7dd3fc"/></svg>`
-      case 'css': return `<svg ${common}><path d="M4 3h16v18l-8-3-8 3V3z" fill="#60a5fa"/></svg>`
-      case 'js': return `<svg ${common}><path d="M2 2h20v20H2V2zm13.5 15.5c1.2.7 2.2.6 2.9.3.6-.2 1-.8 1-1.6 0-2.9-5.6-2.9-5.6-4.5 0-1 .8-1.7 2-1.7 1 .1 1.8.6 2.3 1.4l1.2-.8c-.9-1.6-2.6-2.4-4.5-2.5-3.2 0-5.3 1.9-5.3 4.6 0 3 2.8 4.1 4.9 5.3z" fill="#f7df1e"/></svg>`
-      case 'json': return `<svg ${common}><path d="M4 4h16v16H4V4zm5 5h6v2H9V9zm0 4h6v2H9v-2z" fill="#34d399"/></svg>`
-      default: return `<svg ${common}><path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#c7c7c7"/></svg>`
+      // Use Material Symbols Rounded spans for a consistent icon set
+      case 'html': return `<span class="msr">code</span>`
+      case 'css': return `<span class="msr">tag</span>`
+      case 'js': return `<span class="msr">javascript</span>`
+      case 'json': return `<span class="msr">data_object</span>`
+      default: return `<span class="msr">insert_drive_file</span>`
     }
   }
 
   function deleteFile(name){
     if(!(name in files)) return
-    if(!confirm('Delete "' + name + '"? This cannot be undone.')) return
+    // deletion confirmation is handled before calling this, but guard just in case
     // remove from files and tabs
     delete files[name]
     const ti = tabs.indexOf(name)
@@ -312,24 +536,33 @@
     tabs.forEach(name=>{
       const t = document.createElement('div')
       t.className = 'tab' + (name===active? ' active':'')
-      // separate label span so close button doesn't steal clicks
-      const label = document.createElement('span')
+      t.dataset.name = name
+
       const ico = document.createElement('span')
+      ico.className = 'file-icon'
       ico.style.marginRight = '8px'
       ico.style.opacity = '0.95'
       ico.style.width = '18px'
       ico.style.display = 'inline-block'
       ico.style.textAlign = 'center'
       try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
-      // show dirty marker if unsaved
-      let lbl = name
-      if(name === active && editor){
-        const isDirty = editor.getValue() !== (files[name]||'')
-        if(isDirty) lbl = name + ' *'
-      }
-      label.textContent = lbl
+
+      const label = document.createElement('span')
       label.style.paddingRight = '8px'
       label.addEventListener('click', ()=> openFile(name))
+      label.textContent = name
+
+      // dirty indicator for active unsaved file
+      if(name === active && editor){
+        const isDirty = editor.getValue() !== (files[name]||'')
+        if(isDirty){
+          const d = document.createElement('span')
+          d.className = 'dirty-indicator'
+          d.title = 'Unsaved changes'
+          label.appendChild(d)
+        }
+      }
+
       t.appendChild(ico)
       t.appendChild(label)
       const close = document.createElement('button')
@@ -357,6 +590,8 @@
     editor.focus()
     const filenameEl = document.getElementById('editor-filename')
     if(filenameEl) filenameEl.textContent = name
+    // update document title to reflect active file
+    try{ document.title = 'NuaCode - ' + name }catch(e){}
     updateStatus('Opened ' + name)
     // ensure bottom panel remains visible when switching files
     try{ const bp = document.getElementById('bottom-panel'); if(bp) bp.style.display = 'block' }catch(e){}
@@ -375,29 +610,136 @@
   }
 
   function createNewFile(){
-    let name = prompt('New file name (include extension):', 'untitled.html')
-    if(!name) return
-    name = name.trim()
-    if(!name) return
-    // ensure a simple filename (no path traversal)
-    name = name.replace(/\\/g, '/').split('/').pop()
-    // default to .html if no extension
-    if(!/\.[a-z0-9]+$/i.test(name)) name += '.html'
-    if(name in files){ alert('File exists'); return }
-    files[name] = ''
-    saveToStorage()
-    renderFileList()
-    openFile(name)
+    // start inline creation — call the inline create implementation (alias)
+    if(typeof startCreateFileInline === 'function') startCreateFileInline()
+    else startCreateFile()
+  }
+
+  // Inline create: insert a temporary list item with an input for the filename
+  function startCreateFile(){
+    const list = document.getElementById('file-list')
+    if(!list) return
+    const li = document.createElement('li')
+    li.className = 'creating'
+    const ico = document.createElement('span')
+    ico.className = 'file-icon'
+    ico.style.marginRight = '8px'
+    ico.style.width = '20px'
+    ico.style.display = 'inline-block'
+    ico.style.textAlign = 'center'
+    ico.innerHTML = `<span class="msr">insert_drive_file</span>`
+    li.appendChild(ico)
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.placeholder = 'filename.ext'
+    input.style.flex = '1'
+    input.style.padding = '6px 8px'
+    input.style.borderRadius = '6px'
+    input.style.border = '1px solid rgba(255,255,255,0.04)'
+    input.style.background = 'rgba(255,255,255,0.02)'
+    input.style.color = 'var(--muted)'
+    li.appendChild(input)
+    const err = document.createElement('div')
+    err.style.color = '#ff6b6b'
+    err.style.fontSize = '12px'
+    err.style.marginTop = '6px'
+    err.style.display = 'none'
+    li.appendChild(err)
+    list.insertBefore(li, list.firstChild)
+    input.focus(); input.select()
+
+    function cleanup(){ if(li && li.parentNode) li.parentNode.removeChild(li) }
+    function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
+
+    function commit(){
+      let name = (input.value || '').trim()
+      if(!name){ cleanup(); return }
+      if(!/\.[a-z0-9]+$/i.test(name)) name += '.html'
+      const existsKey = Object.keys(files).find(k => k.toLowerCase() === name.toLowerCase())
+      if(existsKey){
+        const listEl = document.getElementById('file-list')
+        const found = listEl && Array.from(listEl.querySelectorAll('li')).find(li=> li.dataset && li.dataset.name && li.dataset.name.toLowerCase() === existsKey.toLowerCase())
+        if(found && found.offsetParent !== null){ cleanup(); openFile(existsKey); return }
+        showInlineError('A file named "' + name + '" already exists.')
+        return
+      }
+      files[name] = ''
+      saveToStorage()
+      renderFileList()
+      openFile(name)
+    }
+
+    input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') { commit() } else if(e.key === 'Escape') { cleanup() } })
+    input.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
+  }
+
+  // Inline rename: replace label with input prefilled with current name
+  function startRename(currentName){
+    const list = document.getElementById('file-list')
+    if(!list) return
+    const li = Array.from(list.querySelectorAll('li')).find(l=> l.dataset && l.dataset.name === currentName)
+    if(!li) return
+    const spans = li.querySelectorAll('span')
+    const labelSpan = spans && spans[1]
+    if(labelSpan) labelSpan.style.display = 'none'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.value = currentName
+    input.style.flex = '1'
+    input.style.padding = '6px 8px'
+    input.style.borderRadius = '6px'
+    input.style.border = '1px solid rgba(255,255,255,0.04)'
+    input.style.background = 'rgba(255,255,255,0.02)'
+    input.style.color = 'var(--muted)'
+    const err = document.createElement('div')
+    err.style.color = '#ff6b6b'
+    err.style.fontSize = '12px'
+    err.style.marginTop = '6px'
+    err.style.display = 'none'
+    li.insertBefore(input, labelSpan)
+    li.insertBefore(err, input.nextSibling)
+    input.focus(); input.select()
+
+    function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
+    function revert(){ if(input && input.parentNode) input.parentNode.removeChild(input); if(err && err.parentNode) err.parentNode.removeChild(err); if(labelSpan) labelSpan.style.display = '' }
+
+    function finishRename(newName){
+      newName = (newName || '').trim()
+      if(!newName){ revert(); return }
+      let safe = newName.replace(/\\/g,'/').split('/').pop()
+      // if user omitted an extension, preserve original extension
+      if(!/\.[a-z0-9]+$/i.test(safe)){
+        const origExt = (currentName && currentName.split('.').pop()) || ''
+        if(origExt) safe = safe + '.' + origExt
+      }
+      if(safe === currentName){ revert(); return }
+      const existsKey = Object.keys(files).find(k => k.toLowerCase() === safe.toLowerCase())
+      if(safe.toLowerCase() !== currentName.toLowerCase() && existsKey){ showInlineError('A file named "' + safe + '" already exists.'); return }
+      files[safe] = files[currentName]
+      delete files[currentName]
+      const ti = tabs.indexOf(currentName)
+      if(ti>=0) tabs[ti] = safe
+      if(active === currentName) active = safe
+      saveToStorage()
+      if(err && err.parentNode) err.parentNode.removeChild(err)
+      renderFileList(); renderTabs();
+    }
+
+    input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') { finishRename(input.value) } else if(e.key === 'Escape') { revert() } })
+    // blur cancels/commits silently: prefer cancelling to avoid modal loops
+    input.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement !== input) { finishRename(input.value) } }, 120) })
   }
 
   function saveCurrent(){
-    if(!active) { alert('No active file'); return }
+    if(!active) { showDialog('Save','No active file'); return }
     files[active] = editor.getValue()
     saveToStorage()
     updateStatus('Saved ' + active)
     // update indicators
     renderTabs()
     renderFileList()
+    // run lint if enabled
+    try{ if(settings.lintOnSave) runLint() }catch(e){}
   }
 
   function saveAll(){
@@ -405,6 +747,7 @@
     if(active && editor) files[active] = editor.getValue()
     saveToStorage()
     updateStatus('Saved all files')
+    try{ if(settings.lintOnSave) runLint() }catch(e){}
   }
 
   function updateStatus(text){
@@ -612,13 +955,35 @@
     const monitor = doc.createElement('script')
     monitor.type = 'text/javascript'
     monitor.text = `(function(){
-      function send(kind, msg, src, line, col){
-        try{ parent.postMessage({type:'mini-vsc-error', kind: kind, message: String(msg), source: src || '', line: line||0, column: col||0}, '*') }catch(e){}
+      function send(type, payload){ try{ parent.postMessage(Object.assign({type: type}, payload), '*') }catch(e){} }
+
+      function safeSerialize(val){
+        try{
+          if(typeof val === 'string') return val
+          if(typeof val === 'undefined') return 'undefined'
+          if(val === null) return 'null'
+          return JSON.stringify(val)
+        }catch(e){
+          try{ return String(val) }catch(ex){ return '[unserializable]' }
+        }
       }
-      window.addEventListener('error', function(e){ send('error', e.message, (e.filename||''), e.lineno, e.colno) })
-      window.addEventListener('unhandledrejection', function(e){ send('promise', (e.reason && e.reason.message) || String(e.reason), '', 0, 0) })
-      const origErr = console.error
-      console.error = function(){ try{ send('console', Array.from(arguments).map(a=>typeof a==='object'? JSON.stringify(a): String(a)).join(' '), '', 0, 0) }catch(e){}; origErr.apply(console, arguments) }
+
+      window.addEventListener('error', function(e){
+        try{
+          var stack = ''
+          try{ stack = (e && e.error && e.error.stack) || (e && e.stack) || '' }catch(_){ stack = '' }
+          send('mini-vsc-error', { kind:'error', message: (e && e.message) ? String(e.message) : String(e), source: (e && e.filename) || '', line: (e && e.lineno) || 0, column: (e && e.colno) || 0, stack: stack })
+        }catch(ex){ try{ send('mini-vsc-error', { kind:'error', message: String(e), source: (e && e.filename) || '', line: (e && e.lineno) || 0, column: (e && e.colno) || 0 }) }catch(_){} }
+      })
+
+      window.addEventListener('unhandledrejection', function(e){
+        try{
+          var reason = e && e.reason
+          send('mini-vsc-error', { kind:'promise', message: (reason && reason.message) || safeSerialize(reason), source: '', line: 0, column: 0, stack: (reason && reason.stack) || '' })
+        }catch(ex){ try{ send('mini-vsc-error', { kind:'promise', message: String(e), source: '', line:0, column:0 }) }catch(_){} }
+      })
+
+      // do not override console methods to avoid cross-environment errors
     })();`
     body.appendChild(monitor)
 
@@ -639,15 +1004,31 @@
         }
       }catch(e){}
       window._miniVSC_auxUrls = []
-
       const html = buildPreview()
-      // use blob URL so external resources load reliably and origin allows postMessage
-      const blob = new Blob([html], {type: 'text/html'})
-      const url = URL.createObjectURL(blob)
-      // revoke previous blob url if exists
-      if(window._miniVSC_lastPreviewUrl){ try{ URL.revokeObjectURL(window._miniVSC_lastPreviewUrl) }catch(e){} }
-      window._miniVSC_lastPreviewUrl = url
-      previewEl.src = url
+      // Prefer using srcdoc (avoids blob origin restrictions). Fall back to blob if srcdoc unsupported.
+      try{
+        if('srcdoc' in previewEl){
+          // clear previous blob if any
+          if(window._miniVSC_lastPreviewUrl){ try{ URL.revokeObjectURL(window._miniVSC_lastPreviewUrl) }catch(e){} }
+          window._miniVSC_lastPreviewUrl = null
+          previewEl.srcdoc = html
+        }else{
+          const blob = new Blob([html], {type: 'text/html'})
+          const url = URL.createObjectURL(blob)
+          if(window._miniVSC_lastPreviewUrl){ try{ URL.revokeObjectURL(window._miniVSC_lastPreviewUrl) }catch(e){} }
+          window._miniVSC_lastPreviewUrl = url
+          previewEl.src = url
+        }
+      }catch(e){
+        // last resort: blob URL
+        try{
+          const blob = new Blob([html], {type: 'text/html'})
+          const url = URL.createObjectURL(blob)
+          if(window._miniVSC_lastPreviewUrl){ try{ URL.revokeObjectURL(window._miniVSC_lastPreviewUrl) }catch(e){} }
+          window._miniVSC_lastPreviewUrl = url
+          previewEl.src = url
+        }catch(err){ console.error('preview fail', err); updateStatus('Preview error') }
+      }
       updateStatus('Preview updated')
     }catch(e){
       console.error(e)
@@ -677,6 +1058,316 @@
       }
       updateStatus('Preview stopped')
     }catch(e){ console.error('stopPreview', e); updateStatus('Stop failed') }
+  }
+
+  // --- Searcher implementation ---
+  function createSearcherUI(){
+    const input = document.getElementById('search-input')
+    const nextBtn = document.getElementById('search-next')
+    const prevBtn = document.getElementById('search-prev')
+    const caseBox = document.getElementById('search-case')
+    const counter = document.getElementById('search-counter')
+    const closeBtn = document.getElementById('close-search')
+    const replaceInput = document.getElementById('replace-input')
+    const replaceOne = document.getElementById('replace-one')
+    const replaceAllBtn = document.getElementById('replace-all')
+
+    if(!input) return
+
+    // state
+    let matches = []
+    let current = -1
+    let markerIds = []
+
+    const Range = ace.require && ace.require('ace/range') ? ace.require('ace/range').Range : null
+
+    function clearMarkers(){
+      try{
+        if(!editor) return
+        const s = editor.getSession()
+        markerIds.forEach(id=>{ try{ s.removeMarker(id) }catch(e){} })
+        markerIds = []
+      }catch(e){}
+    }
+
+    function updateCounter(){
+      if(!matches || matches.length===0){ counter.textContent = 'No results'; return }
+      counter.textContent = `${current+1} / ${matches.length}`
+    }
+
+    function performSearch(){
+      clearMarkers(); matches = []; current = -1
+      const q = input.value
+      if(!q || q.length===0){ updateCounter(); return }
+      const caseSensitive = !!(caseBox && caseBox.checked)
+      const sess = editor.getSession()
+      const lines = sess.getDocument().getAllLines()
+      for(let r=0;r<lines.length;r++){
+        const line = lines[r]
+        let searchLine = caseSensitive ? line : line.toLowerCase()
+        const needle = caseSensitive ? q : q.toLowerCase()
+        let idx = 0
+        while(true){
+          const found = searchLine.indexOf(needle, idx)
+          if(found === -1) break
+          // create range
+          if(Range){
+            const range = new Range(r, found, r, found + needle.length)
+            matches.push(range)
+          }
+          idx = found + Math.max(1, needle.length)
+        }
+      }
+      // add markers for all matches
+      try{
+        if(Range){
+          matches.forEach((rng,i)=>{
+            const cl = 'ace_search_highlight'
+            const id = editor.getSession().addMarker(rng, cl, 'text', false)
+            markerIds.push(id)
+          })
+        }
+      }catch(e){ console.error('marker add failed', e) }
+      if(matches.length>0){ current = 0; highlightCurrent() }
+      updateCounter()
+    }
+
+    function highlightCurrent(){
+      // remove previous active marker(s)
+      try{
+        // remove any active class markers by clearing and re-adding
+        clearMarkers()
+        // re-add all as normal
+        if(Range){
+          matches.forEach((rng,i)=>{
+            const cl = (i===current) ? 'ace_search_active' : 'ace_search_highlight'
+            const id = editor.getSession().addMarker(rng, cl, 'text', false)
+            markerIds.push(id)
+          })
+        }
+      }catch(e){ console.error(e) }
+      updateCounter()
+      // scroll to and select current
+      try{
+        if(matches.length>0 && current>=0 && matches[current]){
+          const r = matches[current]
+          editor.scrollToLine(r.start.row, true, true, function() {})
+          editor.getSelection().setSelectionRange(r)
+        }
+      }catch(e){}
+    }
+
+    function nextMatch(){ if(matches.length===0) return; current = (current+1) % matches.length; highlightCurrent() }
+    function prevMatch(){ if(matches.length===0) return; current = (current-1 + matches.length) % matches.length; highlightCurrent() }
+
+    function replaceCurrent(){
+      if(matches.length===0 || current<0) return
+      const repl = replaceInput.value || ''
+      const rng = matches[current]
+      if(!rng) return
+      try{
+        editor.getSession().replace(rng, repl)
+      }catch(e){ console.error('replace failed', e) }
+      // after replace, re-run search to refresh ranges
+      setTimeout(()=> performSearch(), 10)
+    }
+
+    function replaceAll(){
+      const q = input.value
+      if(!q) return
+      const repl = replaceInput.value || ''
+      // ensure matches are available; perform search if needed
+      if(!matches || matches.length === 0) performSearch()
+      const sess = editor.getSession()
+      try{
+        // apply replacements from end to start so earlier edits don't shift later ranges
+        for(let i = (matches.length-1); i >= 0; i--){
+          const rng = matches[i]
+          if(!rng) continue
+          try{ sess.replace(rng, repl) }catch(e){ console.error('replace range failed', e) }
+        }
+      }catch(e){ console.error('replaceAll failed', e) }
+      // refresh matches and markers
+      setTimeout(()=> performSearch(), 10)
+    }
+
+    // event wiring
+    const panel = document.getElementById('search-panel')
+    // move panel into the editor area so it sits over the code box (top-right)
+    try{
+      const editorMain = document.getElementById('editor-main')
+      if(panel && editorMain){
+        // ensure editorMain is positioned to be the containing block
+        editorMain.style.position = editorMain.style.position || 'relative'
+        editorMain.appendChild(panel)
+        panel.style.position = 'absolute'
+        panel.style.right = '12px'
+        panel.style.top = '6px'
+        panel.style.zIndex = 60
+      }
+    }catch(e){}
+
+    // replace UI: hide replace-row by default and provide a toggle arrow left of search
+    try{
+      const replaceRow = panel ? panel.querySelector('.replace-row') : null
+      const toggleBtn = panel ? panel.querySelector('#toggle-replace') : null
+      if(replaceRow) replaceRow.style.display = 'none'
+      if(toggleBtn){
+        // ensure arrow looks right initially (use material icon)
+        toggleBtn.innerHTML = '<span class="msr">arrow_right</span>'
+        toggleBtn.title = 'Show Replace'
+        toggleBtn.addEventListener('click', ()=>{
+          const showing = replaceRow && replaceRow.style.display !== 'none'
+          if(replaceRow) replaceRow.style.display = showing ? 'none' : 'flex'
+          toggleBtn.innerHTML = showing ? '<span class="msr">arrow_right</span>' : '<span class="msr">arrow_drop_down</span>'
+          toggleBtn.title = showing ? 'Show Replace' : 'Hide Replace'
+          // after revealing, focus replace input
+          if(!showing){ const r = panel.querySelector('#replace-input'); if(r) r.focus(); }
+        })
+      }
+    }catch(e){ /* non-fatal */ }
+    input.addEventListener('input', debounce(()=> performSearch(), 160))
+    caseBox && caseBox.addEventListener('change', ()=> performSearch())
+    nextBtn && nextBtn.addEventListener('click', ()=> nextMatch())
+    prevBtn && prevBtn.addEventListener('click', ()=> prevMatch())
+    closeBtn && closeBtn.addEventListener('click', ()=>{ clearMarkers(); input.value=''; if(replaceInput) replaceInput.value=''; updateCounter(); if(panel) panel.style.display = 'none'; const rr = panel && panel.querySelector('.replace-row'); const tb = panel && panel.querySelector('#toggle-replace'); if(rr) rr.style.display='none'; if(tb) tb.innerHTML = '<span class="msr">arrow_right</span>'; try{ editor.focus() }catch(e){} })
+    replaceOne && replaceOne.addEventListener('click', ()=> replaceCurrent())
+    replaceAllBtn && replaceAllBtn.addEventListener('click', ()=> replaceAll())
+    // shortcuts: Ctrl/Cmd+F opens search, Ctrl/Cmd+G next, Escape closes
+    window.addEventListener('keydown', (e)=>{
+      // ignore when focus is in an input other than editor unless opener
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='f'){
+        e.preventDefault(); if(panel) panel.style.display = ''; try{ input.focus(); input.select() }catch(e){}
+      }
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='g'){
+        e.preventDefault(); nextMatch()
+      }
+      if(e.key === 'Escape'){
+        if(panel && panel.style.display !== 'none'){ clearMarkers(); panel.style.display = 'none'; try{ editor.focus() }catch(e){} }
+      }
+    })
+    // keyboard shortcuts (within editor): Ctrl/Cmd+F focuses search
+    window.addEventListener('keydown', (e)=>{
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='f'){
+        e.preventDefault(); input.focus(); input.select();
+      }
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='g'){
+        e.preventDefault(); nextMatch()
+      }
+    })
+  }
+
+  // --- Project search (simple UI) ---
+  window.MINI_VSC_openFile = function(filename, line){ try{ openFile(filename); if(line && editor) editor.gotoLine(parseInt(line,10),0,true); const modal = document.getElementById('dialog-modal'); if(modal) modal.style.display='none' }catch(e){}}
+  function openProjectSearch(){
+    const q = prompt('Project search — enter query')
+    if(!q) return
+    const results = []
+    Object.keys(files).forEach(name=>{
+      const txt = files[name] || ''
+      const lines = txt.split(/\n/)
+      lines.forEach((ln,i)=>{ if(ln.toLowerCase().includes(q.toLowerCase())) results.push({file:name, line:i+1, text: ln.trim()}) })
+    })
+    if(results.length===0){ showDialog('Search','No matches for "' + q + '"'); return }
+    // build HTML list with clickable entries that call MINI_VSC_openFile
+    let html = '<div style="max-height:320px; overflow:auto; font-family:monospace;">'
+    results.slice(0,200).forEach(r=>{
+      html += '<div style="padding:6px 4px">'
+      html += '<a href="#" onclick="window.MINI_VSC_openFile(' + JSON.stringify(r.file) + ',' + r.line + '); return false;">'
+      html += escapeHtml(r.file) + ':' + r.line
+      html += '</a> — <span style="color:var(--muted)">' + escapeHtml(r.text) + '</span></div>'
+    })
+    html += '</div>'
+    showDialog('Search results', html)
+  }
+
+  function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+  // --- TODO scanner ---
+  function scanTodos(){
+    const todos = []
+    Object.keys(files).forEach(name=>{
+      const lines = (files[name]||'').split(/\n/)
+      lines.forEach((ln,i)=>{
+        const m = ln.match(/\b(TODO|FIXME)\b[:\s-]*(.*)/i)
+        if(m) todos.push({file:name, line:i+1, kind: m[1].toUpperCase(), text: m[2].trim()})
+      })
+    })
+    if(todos.length===0){ showDialog('TODOs','No TODO/FIXME found') ; return }
+    // push to errors list as 'todo' entries so they appear in Problems panel
+    todos.slice(0,500).forEach(t=> errors.unshift({ kind: 'TODO', message: t.text || '(no message)', source: t.file, line: t.line, column: 0 }))
+    errors = errors.slice(0,200)
+    renderErrors()
+  }
+
+  // Insert a new TODO at the current cursor position (or top of file)
+  function createTodo(){
+    if(!editor || !active){
+      // if no editor open, create a new file with a TODO
+      const name = prompt('No active file. Enter filename for TODO (e.g. todo.txt)')
+      if(!name) return
+      const fname = name.indexOf('.')===-1? (name + '.txt') : name
+      files[fname] = '// TODO: ' + '\n'
+      saveToStorage(); renderFileList(); openFile(fname); return
+    }
+    const text = prompt('TODO text')
+    if(!text) return
+    // choose comment style by extension
+    const ext = (active.split('.').pop() || '').toLowerCase()
+    let comment = '// TODO: '
+    if(ext === 'html' || ext === 'htm') comment = '<!-- TODO: '
+    else if(ext === 'css' || ext === 'scss' || ext === 'sass') comment = '/* TODO: '
+    else if(ext === 'py') comment = '# TODO: '
+    // insert appropriately
+    try{
+      const sel = editor.getSelectionRange()
+      const pos = editor.getCursorPosition()
+      const lineIdx = pos.row
+      let insertion = ''
+      if(comment === '<!-- TODO: ') insertion = comment + text + ' -->\n'
+      else if(comment === '/* TODO: ') insertion = comment + text + ' */\n'
+      else insertion = comment + text + '\n'
+      editor.session.insert({row: lineIdx+1, column: 0}, insertion)
+      // persist into files and save
+      files[active] = editor.getValue()
+      saveToStorage()
+      renderFileList(); renderTabs()
+      updateStatus('Inserted TODO')
+    }catch(e){ console.error('createTodo', e); showDialog('TODO','Insert failed') }
+  }
+
+  // --- Linting (JSHint) ---
+  function ensureJSHintLoaded(cb){
+    if(typeof window.JSHINT !== 'undefined') return cb()
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jshint/2.13.4/jshint.min.js'
+    s.onload = ()=> cb()
+    s.onerror = ()=> { showDialog('Lint','Failed to load linter (network?)'); cb() }
+    document.head.appendChild(s)
+  }
+  function runLint(){
+    ensureJSHintLoaded(()=>{
+      // simple run across .js files
+      const findings = []
+      Object.keys(files).forEach(name=>{
+        if(!name.endsWith('.js')) return
+        try{
+          JSHINT(files[name])
+          const errs = JSHINT.data().errors || []
+          errs.forEach(e=>{ if(e) findings.push({file:name, line: e.line || 0, message: e.reason || e.code || 'Lint issue'}) })
+        }catch(e){ findings.push({file:name, line:0, message: 'Lint failed: '+ String(e)}) }
+      })
+      // remove previous lint entries
+      errors = errors.filter(x=> x.kind !== 'lint')
+      if(findings.length===0){
+        // If no lint findings and no other problems, keep Problems panel clean. We'll show a green 'no problems' message in renderErrors when errors is empty.
+        renderErrors()
+        return
+      }
+      findings.slice(0,200).forEach(f=> errors.unshift({ kind: 'lint', message: f.message, source: f.file, line: f.line }))
+      errors = errors.slice(0,200)
+      renderErrors()
+    })
   }
 
   // Menu actions wiring
@@ -722,19 +1413,42 @@
         ctx.style.display = 'none'
       })
       // prevent default context menu and show our menu on right click
-      document.addEventListener('contextmenu', (e)=>{
-        e.preventDefault()
-        const target = e.target
-        // store last context target name if over a file list item
-        let filename = null
-        const li = target.closest('#file-list li')
-        if(li && li.dataset && li.dataset.name) filename = li.dataset.name
-        // show at mouse position
-        ctx.style.left = e.pageX + 'px'
-        ctx.style.top = e.pageY + 'px'
-        ctx.style.display = 'block'
-        ctx.dataset.target = filename || ''
-      })
+        document.addEventListener('contextmenu', (e)=>{
+          e.preventDefault()
+          const target = e.target
+          // store last context target name if over a file list item
+          let filename = null
+          const li = target.closest('#file-list li')
+          if(li && li.dataset && li.dataset.name) filename = li.dataset.name
+
+          // Prepare menu visibility for scope-based items
+          const isFile = !!filename
+          Array.from(ctx.querySelectorAll('.ctx-item')).forEach(it=>{
+            const scope = it.getAttribute('data-scope') || 'both'
+            if(scope === 'both') it.style.display = ''
+            else if(scope === 'file') it.style.display = isFile? '': 'none'
+            else if(scope === 'global') it.style.display = isFile? 'none': ''
+          })
+
+          // Temporarily show offscreen to measure size, then position so it doesn't overflow
+          ctx.style.display = 'block'
+          ctx.style.left = '0px'
+          ctx.style.top = '0px'
+          const menuW = ctx.offsetWidth || 160
+          const menuH = ctx.offsetHeight || 180
+          let left = e.pageX
+          let top = e.pageY
+          // prevent overflow to the right
+          const pageRight = window.pageXOffset + window.innerWidth
+          if(left + menuW > pageRight) left = Math.max(8, pageRight - menuW - 8)
+          // if near bottom, show above the cursor
+          const pageBottom = window.pageYOffset + window.innerHeight
+          if(top + menuH > pageBottom) top = Math.max(8, e.pageY - menuH)
+
+          ctx.style.left = left + 'px'
+          ctx.style.top = top + 'px'
+          ctx.dataset.target = filename || ''
+        })
       // hide context menu on any left-click outside
       document.addEventListener('mousedown', (e)=>{
         if(!e.target.closest('#context-menu')){
@@ -757,8 +1471,8 @@
       const ok = document.execCommand('copy')
       ta.remove()
       if(ok) updateStatus('Copied')
-      else alert('Copy failed')
-    }catch(e){ alert('Copy failed: ' + (e && e.message || e)) }
+      else showDialog('Copy failed','Copy failed')
+    }catch(e){ showDialog('Copy failed','Copy failed: ' + (e && e.message || e)) }
   }
 
   function handleMenuAction(action){
@@ -767,38 +1481,49 @@
     const ctxTarget = ctx && ctx.dataset && (ctx.dataset.target || ctx.dataset.lastActionTarget) ? (ctx.dataset.target || ctx.dataset.lastActionTarget) : null
     switch(action){
       case 'new': createNewFile(); break
+      case 'saveSettings':{
+        // capture current UI flags
+        if(editor && editor.getSession) settings.wordWrap = !!editor.getSession().getUseWrapMode()
+        settings.autoRefresh = !!autoRefresh
+        try{ settings.uiScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1 }catch(e){}
+        // bottom height already persisted elsewhere
+        saveSettings(); break }
+      case 'restoreSettings':{
+        loadSettings(); applySettings(); updateStatus('Settings restored'); break }
+      case 'resetSettings':{
+        settings = { wordWrap:false, autoRefresh:false, uiScale:1 }; saveSettings(); applySettings(); updateStatus('Settings reset'); break }
       case 'save': saveCurrent(); break
       case 'saveall': saveAll(); break
       case 'rename':{
-        // support rename from context menu target
+        // support inline rename from context menu target
         const target = ctxTarget || active
-        if(!target) { alert('No file to rename'); break }
-        const newName = prompt('Rename file', target)
-        if(!newName) break
-        const safe = newName.replace(/\\/g,'/').split('/').pop()
-        if(safe === target) break
-        if(safe in files){ alert('A file with that name already exists'); break }
-        files[safe] = files[target]
-        delete files[target]
-        const ti = tabs.indexOf(target)
-        if(ti>=0) tabs[ti] = safe
-        if(active === target) active = safe
-        saveToStorage()
-        renderFileList(); renderTabs();
+        if(!target) { showDialog('Rename','No file to rename'); break }
+        if(typeof startRenameInline === 'function') startRenameInline(target)
+        else startRename(target)
         break }
       case 'delete':{
         // delete either context target or active
         const toDel = ctxTarget || active
-        if(!toDel) { alert('No file to delete'); break }
-        deleteFile(toDel)
+        if(!toDel) { showDialog('Delete','No file to delete'); break }
+        showConfirm('Delete','Delete "' + toDel + '"? This cannot be undone.').then(ok=>{ if(ok) deleteFile(toDel) })
         break }
       case 'download':{
         const target = ctxTarget || active
-        if(!target) { alert('No file to download'); break }
+        if(!target) { showDialog('Download','No file to download'); break }
         const blob = new Blob([files[target]], {type:'text/plain'})
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url; a.download = target; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+        break }
+      case 'downloadAll':{
+        // simple project export as JSON containing all files
+        try{
+          const payload = JSON.stringify(files, null, 2)
+          const blobAll = new Blob([payload], {type:'application/json'})
+          const urlAll = URL.createObjectURL(blobAll)
+          const a2 = document.createElement('a')
+          a2.href = urlAll; a2.download = 'project-files.json'; document.body.appendChild(a2); a2.click(); a2.remove(); URL.revokeObjectURL(urlAll)
+        }catch(e){ showDialog('Export failed', 'Export failed: '+ (e && e.message || e)) }
         break }
       case 'toggleOutline':{
         const out = document.getElementById('outline-panel')
@@ -825,29 +1550,44 @@
         if(btn) btn.click()
         break }
       case 'tidy':
-        if(!active){ alert('No active file to tidy'); break }
+        if(!active){ showDialog('Tidy','No active file to tidy'); break }
         ensureBeautifyLoaded(()=>{
           try{
             const cur = editor.getValue()
             let out = cur
-            if(active.endsWith('.html')) out = html_beautify(cur, {indent_size:2})
-            else if(active.endsWith('.css')) out = css_beautify(cur, {indent_size:2})
-            else if(active.endsWith('.js')) out = js_beautify(cur, {indent_size:2})
+            if(active.endsWith('.html')){
+              if(typeof html_beautify !== 'undefined') out = html_beautify(cur, {indent_size:2})
+              else if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
+            }else if(active.endsWith('.css')){
+              if(typeof css_beautify !== 'undefined') out = css_beautify(cur, {indent_size:2})
+              else if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
+            }else if(active.endsWith('.js')){
+              if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
+            }
             files[active] = out
             editor.setValue(out, -1)
             saveToStorage()
             updateStatus('Tidied ' + active)
-          }catch(e){ console.error(e); alert('Tidy failed: '+e.message) }
+            }catch(e){ console.error(e); showDialog('Tidy failed','Tidy failed: '+e.message) }
         })
         break
+      case 'duplicate':{
+        duplicateSelectionOrLine()
+        break
+      }
+      case 'cheatsheet':{
+        const m = document.getElementById('cheatsheet-modal')
+        if(m) m.style.display = 'flex'
+        break
+      }
       case 'commentOut':{
         if(editor){ try{ toggleCommentSelection(); }catch(e){ console.error(e) } }
-        else alert('No editor available to comment/uncomment')
+        else showDialog('Comment','No editor available to comment/uncomment')
         break }
       case 'copy':{
         // copy selected text or whole file
         const selText = (editor && editor.getSelectedText && editor.getSelectedText()) || (ctxTarget && files[ctxTarget]) || (active && files[active]) || ''
-        if(!selText){ alert('Nothing to copy'); break }
+        if(!selText){ showDialog('Copy','Nothing to copy'); break }
         if(navigator.clipboard && navigator.clipboard.writeText){
           navigator.clipboard.writeText(selText).then(()=> updateStatus('Copied')) .catch(()=>{ fallbackCopy(selText) })
         }else{ fallbackCopy(selText) }
@@ -866,20 +1606,20 @@
           if(navigator.clipboard && navigator.clipboard.writeText){
             navigator.clipboard.writeText(textToCut).then(()=>{ files[targetFile] = ''; saveToStorage(); renderFileList(); updateStatus('Cut ' + targetFile) }).catch(()=>{ fallbackCopy(textToCut); files[targetFile] = ''; saveToStorage(); renderFileList(); updateStatus('Cut ' + targetFile) })
           }else{ fallbackCopy(textToCut); files[targetFile] = ''; saveToStorage(); renderFileList(); updateStatus('Cut ' + targetFile) }
-        }else{ alert('Nothing to cut') }
+        }else{ showDialog('Cut','Nothing to cut') }
         break }
       case 'paste':{
         const targetFile = ctxTarget || active
         if(editor && editor.focus){
           // paste into editor at cursor
           if(navigator.clipboard && navigator.clipboard.readText){
-            navigator.clipboard.readText().then(txt=>{ editor.insert(txt); updateStatus('Pasted') }).catch(()=>{ alert('Paste failed; clipboard not available') })
-          }else{ alert('Paste not available in this browser') }
+            navigator.clipboard.readText().then(txt=>{ editor.insert(txt); updateStatus('Pasted') }).catch(()=>{ showDialog('Paste','Paste failed; clipboard not available') })
+          }else{ showDialog('Paste','Paste not available in this browser') }
         }else if(targetFile && (targetFile in files)){
           if(navigator.clipboard && navigator.clipboard.readText){
-            navigator.clipboard.readText().then(txt=>{ files[targetFile] = (files[targetFile]||'') + txt; saveToStorage(); renderFileList(); updateStatus('Pasted into ' + targetFile) }).catch(()=>{ alert('Paste failed; clipboard not available') })
-          }else{ alert('Paste not available in this browser') }
-        }else{ alert('No target to paste into') }
+            navigator.clipboard.readText().then(txt=>{ files[targetFile] = (files[targetFile]||'') + txt; saveToStorage(); renderFileList(); updateStatus('Pasted into ' + targetFile) }).catch(()=>{ showDialog('Paste','Paste failed; clipboard not available') })
+          }else{ showDialog('Paste','Paste not available in this browser') }
+        }else{ showDialog('Paste','No target to paste into') }
         break }
       case 'undo': if(editor) editor.undo(); break
       case 'redo': if(editor) editor.redo(); break
@@ -889,16 +1629,52 @@
         if(!editor) break
         const use = !editor.getSession().getUseWrapMode()
         editor.getSession().setUseWrapMode(use)
-        updateStatus('Word wrap ' + (use? 'on':'off'))
+        settings.wordWrap = !!use; saveSettings(); updateStatus('Word wrap ' + (use? 'on':'off'))
         break }
       case 'autoRefresh':{
         autoRefresh = !autoRefresh
-        updateStatus('Auto Refresh ' + (autoRefresh? 'enabled':'disabled'))
+        settings.autoRefresh = !!autoRefresh; saveSettings(); updateStatus('Auto Refresh ' + (autoRefresh? 'enabled':'disabled'))
         break }
+      case 'lint':{
+        runLint(); break }
+      case 'projectSearch':{ openProjectSearch(); break }
+      case 'scanTodos':{ scanTodos(); break }
+      case 'createTodo':{ createTodo(); break }
       case 'run': runPreview(); break
-      case 'about': alert('UNDER DEVELOPMENT!') ; break
+      case 'about': showDialog('About','UNDER DEVELOPMENT!') ; break
       
     }
+  }
+
+  // Update visibility for conditional menu/context items (e.g. selection-only items)
+  function updateMenuConditionals(){
+    try{
+      const hasSelection = !!(editor && editor.getSelectedText && editor.getSelectedText().length>0)
+      document.querySelectorAll('.conditional.selection').forEach(el=>{
+        el.style.display = hasSelection ? '' : 'none'
+      })
+      // also collapse open menus if nothing selected
+      if(!hasSelection) {
+        Array.from(document.querySelectorAll('.menu.open')).forEach(m=> m.classList.remove('open'))
+      }
+    }catch(e){ }
+  }
+
+  // Duplicate selection or current line if no selection
+  function duplicateSelectionOrLine(){
+    if(!editor) return
+    const selText = editor.getSelectedText()
+    if(selText && selText.length>0){
+      const range = editor.getSelectionRange()
+      editor.session.insert(range.end, selText)
+    }else{
+      const pos = editor.getCursorPosition()
+      const r = pos.row
+      const line = editor.session.getLine(r) || ''
+      const insertPos = {row: r+1, column: 0}
+      editor.session.insert(insertPos, line + '\n')
+    }
+    editor.focus()
   }
 
   // dynamically load js-beautify when needed
@@ -918,17 +1694,20 @@
       return cb()
     }
 
-    // Try to load the main bundle, then ensure html beautifier specifically
+    // Try to load the main bundle, then ensure css/html beautifiers specifically
     const mainUrl = 'https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.14.0/beautify.min.js'
+    const cssUrl = 'https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.14.0/beautify-css.min.js'
     const htmlUrl = 'https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.14.0/beautify-html.min.js'
 
     loadScript(mainUrl).catch(()=>{}).then(()=>{
-      if(typeof window.html_beautify === 'undefined'){
-        return loadScript(htmlUrl).catch(()=>{})
-      }
+      const promises = []
+      if(typeof window.css_beautify === 'undefined') promises.push(loadScript(cssUrl).catch(()=>{}))
+      if(typeof window.html_beautify === 'undefined') promises.push(loadScript(htmlUrl).catch(()=>{}))
+      return Promise.all(promises)
     }).then(()=>{
-      if(typeof window.js_beautify === 'undefined' && typeof window.html_beautify === 'undefined'){
-        alert('Failed to load tidy library')
+      // final sanity: if none loaded, warn
+      if(typeof window.js_beautify === 'undefined' && typeof window.css_beautify === 'undefined' && typeof window.html_beautify === 'undefined'){
+        showDialog('Error','Failed to load tidy library')
       }
       cb()
     }).catch((err)=>{ console.error(err); alert('Failed to load tidy library') })
@@ -951,6 +1730,11 @@
     // open index.html by default
     const defaultOpen = Object.keys(files).includes('index.html')? 'index.html' : Object.keys(files)[0]
     if(defaultOpen) openFile(defaultOpen)
+    // ensure menu conditionals reflect initial selection state
+    try{ if(typeof updateMenuConditionals === 'function') updateMenuConditionals() }catch(e){}
+
+    // initialize searcher UI
+    try{ if(typeof createSearcherUI === 'function') createSearcherUI() }catch(e){}
 
     // events
     newBtn.onclick = createNewFile
@@ -961,6 +1745,38 @@
       const pc = document.getElementById('preview-container')
       pc.style.display = pc.style.display === 'none' ? 'block' : 'none'
     }
+
+    // cheatsheet close handler
+    try{
+      const csClose = document.getElementById('cheatsheet-close')
+      const csModal = document.getElementById('cheatsheet-modal')
+      if(csClose && csModal){
+        csClose.addEventListener('click', ()=> csModal.style.display = 'none')
+        csModal.addEventListener('click', (e)=>{ if(e.target === csModal) csModal.style.display = 'none' })
+      }
+    }catch(e){}
+
+    // iPad / Safari: mitigate cursor misplacement when page scale changes
+    try{
+      const ua = navigator.userAgent || ''
+      const isIPad = /iPad|iPhone|iPod/.test(ua) || (navigator.maxTouchPoints && navigator.maxTouchPoints>1 && /MacIntel/.test(navigator.platform))
+      const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua)
+      if(isIPad && isSafari){
+        // prevent pinch-zoom which causes coordinate/cursor offset issues in Ace
+        let meta = document.querySelector('meta[name=viewport]')
+        if(!meta){
+          meta = document.createElement('meta')
+          meta.name = 'viewport'
+          document.head.appendChild(meta)
+        }
+        // set to disable user scaling only for iPad Safari to keep cursor aligned
+        meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'
+
+        // ensure editor resizes on focus/orientation change to refresh cursor rendering
+        window.addEventListener('orientationchange', ()=> { try{ if(editor && editor.resize) editor.resize() }catch(e){} })
+        window.addEventListener('focus', ()=> { try{ if(editor && editor.resize) editor.resize() }catch(e){} })
+      }
+    }catch(e){}
 
     // outline toggle in sidebar
     const outlineToggle = document.getElementById('outline-toggle')
@@ -977,23 +1793,49 @@
 
     // bottom panel (Problems and Terminal)
     const bottomPanel = document.getElementById('bottom-panel')
+    // restore saved bottom panel height if available
+    try{ const h = localStorage.getItem('mini_vsc_bottom_height'); if(h && bottomPanel) bottomPanel.style.height = h }catch(e){}
     const errorList = document.getElementById('error-list')
     const clearBtn = document.getElementById('clear-errors')
     const toggleErrors = document.getElementById('toggle-errors')
     const bottomTabs = Array.from(document.querySelectorAll('.bottom-tab'))
     const terminalOutput = document.getElementById('terminal-output')
     const terminalLine = document.getElementById('terminal-line')
-    let errors = []
+    // errors is a module-global (see top of file)
 
     function renderErrors(){
-      errorList.innerHTML = ''
-      errors.forEach(err=>{
+        errorList.innerHTML = ''
+        if(!errors || errors.length === 0){
+          const liEmpty = document.createElement('li')
+          liEmpty.className = 'no-problems'
+          liEmpty.textContent = 'No problems have been detected'
+          errorList.appendChild(liEmpty)
+          return
+        }
+        errors.forEach(err=>{
         const li = document.createElement('li')
-        li.textContent = `[${err.kind}] ${err.message}`
+        const heading = document.createElement('div')
+        heading.textContent = `[${err.kind}] ${err.message}`
+        heading.style.fontFamily = "'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace"
+        heading.style.fontSize = '13px'
+        heading.style.marginBottom = '4px'
+        li.appendChild(heading)
+
         const src = document.createElement('div')
         src.className = 'source'
         src.textContent = err.source + (err.line? `:${err.line}` : '')
+        src.style.fontFamily = 'inherit'
         li.appendChild(src)
+        if(err.stack){
+          const pre = document.createElement('pre')
+          pre.textContent = ('' + err.stack).split('\n').slice(0,6).join('\n')
+          pre.style.whiteSpace = 'pre-wrap'
+          pre.style.marginTop = '6px'
+          pre.style.fontSize = '12px'
+          pre.style.color = 'rgba(255,255,255,0.85)'
+          pre.style.background = 'transparent'
+          li.appendChild(pre)
+        }
         // clicking an error opens the file if available
         li.style.cursor = 'pointer'
         li.addEventListener('click', ()=>{
@@ -1104,11 +1946,26 @@
         }
         // debug: uncomment to see incoming messages
         // console.log('incoming message', d)
-        if(d && d.type === 'mini-vsc-error'){
-          errors.unshift({ kind: d.kind, message: d.message, source: d.source, line: d.line, column: d.column })
+        if(!d) return
+        if(d.type === 'mini-vsc-error'){
+          errors.unshift({ kind: d.kind || d.kind, message: d.message || d.message, source: d.source || d.source, line: d.line || 0, column: d.column || 0, stack: d.stack || '' })
           // keep last 200 errors
           errors = errors.slice(0,200)
           renderErrors()
+          return
+        }
+        if(d.type === 'mini-vsc-log'){
+          // append to debug console
+          const out = document.getElementById('debug-output')
+          if(out){
+            const now = new Date().toLocaleTimeString()
+            const line = document.createElement('div')
+            line.style.whiteSpace = 'pre-wrap'
+            line.textContent = `[${now}] ${d.level || 'log'}: ${d.message || ''}`
+            out.appendChild(line)
+            out.scrollTop = out.scrollHeight
+          }
+          return
         }
       }catch(e){ console.error('message handler error', e) }
     })
@@ -1129,6 +1986,7 @@
       splitter.addEventListener('mousedown', (e)=>{
         dragging = true
         document.body.style.cursor = 'col-resize'
+        try{ if(previewEl) previewEl.style.pointerEvents = 'none' }catch(e){}
         e.preventDefault()
       })
       document.addEventListener('mousemove', (e)=>{
@@ -1143,8 +2001,37 @@
       })
       document.addEventListener('mouseup', ()=>{
         if(dragging){ dragging = false; document.body.style.cursor = ''; 
+          // restore pointer events on iframe
+          try{ if(previewEl) previewEl.style.pointerEvents = '' }catch(e){}
           // save splitter position
           try{ localStorage.setItem('mini_vsc_preview_width', previewContainer.style.width) }catch(e){}
+        }
+      })
+    }
+
+    // Bottom splitter: draggable to resize bottom panel
+    const bottomSplitter = document.getElementById('bottom-splitter')
+    let bottomDragging = false
+    if(bottomSplitter && bottomPanel){
+      bottomSplitter.addEventListener('mousedown', (e)=>{
+        bottomDragging = true
+        document.body.style.cursor = 'row-resize'
+        try{ if(previewEl) previewEl.style.pointerEvents = 'none' }catch(e){}
+        e.preventDefault()
+      })
+      document.addEventListener('mousemove', (e)=>{
+        if(!bottomDragging) return
+        const winH = window.innerHeight
+        const y = e.clientY
+        // compute bottom panel height as distance from bottom to y
+        const newHeight = Math.max(60, Math.min(winH - 120, winH - y))
+        bottomPanel.style.height = newHeight + 'px'
+        if(editor && editor.resize) editor.resize()
+      })
+      document.addEventListener('mouseup', ()=>{
+        if(bottomDragging){ bottomDragging = false; document.body.style.cursor = '';
+          try{ if(previewEl) previewEl.style.pointerEvents = '' }catch(e){}
+          try{ localStorage.setItem('mini_vsc_bottom_height', bottomPanel.style.height) }catch(e){}
         }
       })
     }
@@ -1171,6 +2058,24 @@
       if((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase()==='s'){
         e.preventDefault(); saveAll()
       }
+      // Duplicate: Ctrl/Cmd + D
+      if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase()==='d'){
+        e.preventDefault(); duplicateSelectionOrLine()
+      }
+      // Run preview: Ctrl/Cmd + B (also keep Ctrl/Cmd+R)
+      if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase()==='b'){
+        e.preventDefault(); runPreview()
+      }
+      // Stop preview: Ctrl/Cmd + Shift + R
+      if((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase()==='r'){
+        e.preventDefault(); stopPreview()
+      }
+      // Cheatsheet / Help: F1
+      if(e.key === 'F1'){
+        e.preventDefault();
+        const m = document.getElementById('cheatsheet-modal')
+        if(m) m.style.display = 'flex'
+      }
       // Toggle comment: Ctrl/Cmd + /
       if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '/'){
         // prevent browser quick-find / other default
@@ -1185,9 +2090,12 @@
     updateCursorStatus()
   }
 
-  // Kick off: ensure Ace is loaded first, then setup editor and init app
+  // Kick off: load settings, ensure Ace is loaded first, then setup editor and init app
+  loadSettings()
   ensureAceLoaded(()=>{
     setupEditor()
+    // apply persisted UI settings once editor exists
+    try{ applySettings() }catch(e){}
     init()
     setupMenu()
     // make sure editor resizes to fill area
