@@ -15,8 +15,8 @@
       --bg: #0f1720;
       --panel: #0b1220;
       --muted: #9aa6b2;
-      --accent: #007acc;
-      --accent-2: #22c55e;
+      --accent: #0057ff; /* primary blue accent */
+      --accent-2: #1e90ff; /* secondary blue */
       --sidebar: #071122;
       --status: #06121a;
       font-family: 'Geologica', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
@@ -138,12 +138,22 @@
       color: #858585
     }
 
+    /* Gutter marker for lines modified since last save */
+    .ace_gutter-cell.line-modified {
+      background: rgba(255,165,0,0.12);
+      border-left: 3px solid rgba(255,165,0,0.9);
+    }
+    .ace_gutter-cell.line-saved {
+      background: rgba(34,197,94,0.07);
+      border-left: 3px solid rgba(34,197,94,0.9);
+    }
+
     .ace_gutter .ace_cursor {
       color: #fff
     }
 
     .ace_marker-layer .ace_selection {
-      background: rgba(38, 79, 120, 0.25)
+      background: rgba(0, 87, 255, 0.12)
     }
 
     .ace_cursor {
@@ -664,13 +674,13 @@
 
     /* Search highlights */
     .ace_search_highlight {
-      background: rgba(255, 165, 0, 0.22);
+      background: rgba(0,120,255,0.22);
       border-radius: 6px;
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25) inset;
     }
 
     .ace_search_active {
-      background: rgba(255, 120, 0, 0.34);
+      background: rgba(0,80,255,0.34);
       border-radius: 6px;
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25) inset;
     }
@@ -703,53 +713,67 @@
       <div id="menubar">
         <div class="menu" id="menu-file">File
           <div class="dropdown">
-            <div class="item" data-action="saveSettings">Save Settings</div>
-            <div class="item" data-action="restoreSettings">Restore Settings</div>
-            <div class="item" data-action="resetSettings">Reset Settings</div>
-            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
             <div class="item" data-action="new">New File</div>
             <div class="item" data-action="open">Open File</div>
             <div class="item" data-action="save">Save</div>
             <div class="item" data-action="saveall">Save All</div>
-            <div class="item" data-action="download">Download File</div>
-            <div class="item" data-action="downloadAll">Download Project</div>
             <div class="item" data-action="rename">Rename File</div>
             <div class="item" data-action="delete">Delete File</div>
-            <div class="item" data-action="toggleOutline">Toggle Outline</div>
-            <div class="item" data-action="toggleProblems">Toggle Problems</div>
-            <div class="item" data-action="toggleTerminal">Toggle Terminal</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
+            <div class="item" data-action="download">Download File</div>
+            <div class="item" data-action="downloadAll">Download Project</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
+            <div class="item" data-action="saveSettings">Save Settings</div>
+            <div class="item" data-action="restoreSettings">Restore Settings</div>
+            <div class="item" data-action="toggleAutosave" id="autosave-item">Autosave: Off</div>
+            <div class="item" data-action="resetSettings">Reset Settings</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
+            <!-- View toggles moved to View menu -->
           </div>
         </div>
         <div class="menu" id="menu-edit">Edit
           <div class="dropdown">
-            <div class="item" data-action="createTodo">New TODO</div>
-            <div class="item" data-action="projectSearch">Project Search</div>
-            <div class="item" data-action="scanTodos">Scan TODOs</div>
             <div class="item" data-action="undo">Undo</div>
             <div class="item" data-action="redo">Redo</div>
+            <div class="item" data-action="duplicate">Duplicate Line/Selection</div>
+            <div class="item" data-action="find">Find/Replace</div>
+            <div class="item" data-action="tidy">Code Tidy</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
+            <div class="item" data-action="createTodo">New TODO</div>
+            <div class="item" data-action="scanTodos">Scan TODOs</div>
+            <div class="item" data-action="projectSearch">Project Search</div>
+          </div>
+        </div>
+        
+        <div class="menu" id="menu-selection">Selection
+          <div class="dropdown">
             <div class="item conditional selection" data-action="cut">Cut</div>
             <div class="item conditional selection" data-action="copy">Copy</div>
             <div class="item conditional selection" data-action="paste">Paste</div>
             <div class="item conditional selection" data-action="commentOut">Comment/Uncomment</div>
-            <div class="item" data-action="duplicate">Duplicate Line/Selection</div>
-            <div class="item" data-action="tidy">Code Tidy</div>
-            <div class="item" data-action="find">Find/Replace</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
+            <div class="item conditional selection" data-action="selectionUpper">Uppercase</div>
+            <div class="item conditional selection" data-action="selectionLower">Lowercase</div>
+            <div class="item conditional selection" data-action="findSelection">Find Selection</div>
           </div>
         </div>
         <div class="menu" id="menu-view">View
           <div class="dropdown">
             <div class="item" data-action="togglepreview">Toggle Preview</div>
+            <div class="item" data-action="toggleOutline">Toggle Outline</div>
+            <div class="item" data-action="toggleProblems">Toggle Problems</div>
+            <div class="item" data-action="toggleTerminal">Toggle Terminal</div>
+            <div class="dropdown-sep" style="height:1px; background:rgba(255,255,255,0.02); margin:6px 0"></div>
             <div class="item" data-action="wordwrap">Toggle Word Wrap</div>
             <div class="item" data-action="zoomIn">Zoom In</div>
             <div class="item" data-action="zoomOut">Zoom Out</div>
-            <div class="item" data-action="toggleOutline">Toggle Outline</div>
           </div>
         </div>
         <div class="menu" id="menu-run">Run
           <div class="dropdown">
             <div class="item" data-action="run">Run Preview</div>
-            <div class="item" data-action="lint">Run Lint</div>
             <div class="item" data-action="stop">Stop Preview</div>
+            <div class="item" data-action="lint">Run Lint</div>
             <div class="item" data-action="autoRefresh">Toggle Auto Refresh</div>
           </div>
         </div>
@@ -762,6 +786,7 @@
       </div>
       <div id="topbar">
         <div id="tabs"></div>
+        
         <div id="top-actions">
           <button id="run-preview" title="Run"><span class="msr">play_arrow</span></button>
           <button id="stop-preview" title="Stop"><span class="msr">stop</span></button>
@@ -780,7 +805,9 @@
         </div>
         <div id="splitter" role="separator" aria-orientation="vertical" title="Drag to resize" class="splitter" id="splitter-editor"></div>
         <div id="preview-container">
-          <iframe id="preview" sandbox="allow-scripts allow-modals allow-forms"></iframe>
+          <!-- add allow-same-origin so preview content can use importmaps, blobs and storage
+               (removing it isolates the preview but prevents sessionStorage/import maps) -->
+          <iframe id="preview" sandbox="allow-scripts allow-modals allow-forms allow-same-origin"></iframe>
         </div>
       </div>
 
@@ -804,10 +831,7 @@
         </div>
       </div>
 
-      <div id="statusbar">
-        <div id="status-left">Ready</div>
-        <div id="status-right">Ln 1, Col 1</div>
-      </div>
+      <!-- statusbar removed from here and re-inserted below bottom panel -->
 
       <!-- Bottom panel with tabs: Problems and Terminal -->
       <div id="bottom-panel" style="display:block; height:160px;">
@@ -835,6 +859,15 @@
           </div>
         </div>
       </div>
+      <div id="statusbar">
+        <div id="status-left">Ready</div>
+        <div id="status-right">
+          <span id="status-pos">Ln 1, Col 1</span>
+          <span id="status-spaces" style="margin-left:12px">Spaces: 2</span>
+          <span id="status-enc" style="margin-left:12px">UTF-8</span>
+          <span id="status-lang" style="margin-left:12px">HTML</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -851,6 +884,9 @@
     <div class="ctx-item conditional selection" data-action="paste" data-scope="both">Paste</div>
     <div class="ctx-item" data-action="rename" data-scope="file">Rename</div>
     <div class="ctx-item" data-action="delete" data-scope="file">Delete</div>
+    <div class="ctx-item" data-action="copyPath" data-scope="file">Copy Path</div>
+    <div class="ctx-item" data-action="revealFile" data-scope="file">Reveal in Sidebar</div>
+    <div class="ctx-item" data-action="copyErrors" data-scope="problems">Copy Errors</div>
     <div class="ctx-item" data-action="download" data-scope="file">Download</div>
   </div>
 
@@ -877,6 +913,7 @@
           - Toggle Outline: Ctrl/Cmd + K O
         </div>
       </div>
+
       <div style="margin-top:12px; color:var(--muted); font-size:13px">Selection-aware menu items appear only when you have text selected.</div>
     </div>
   </div>
