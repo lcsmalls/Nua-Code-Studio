@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NuaCode</title>
+  <title>Nua Code Studio</title>
   <link rel="icon" href="favicon.png" type="image/png">
   <!-- Requested fonts: Geologica (sans) and Google Sans Code (monospace) -->
   <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@400;600;700&display=swap" rel="stylesheet">
@@ -16,8 +16,9 @@
       --bg: #0f1720;
       --panel: #0b1220;
       --muted: #9aa6b2;
-      --accent: #0057ff; /* primary blue accent */
-      --accent-2: #1e90ff; /* secondary blue */
+      /* user-requested primary colours: blue primary, red secondary */
+      --accent: #1f6fff; /* vivid blue */
+      --accent-2: #e04b4b; /* vivid red */
       --sidebar: #071122;
       --status: #06121a;
       font-family: 'Geologica', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
@@ -135,26 +136,41 @@
     }
 
     .ace_gutter {
-      background: #252526;
-      color: #858585
+      background: #061425; /* darker gutter to contrast with editor */
+      color: var(--accent) !important; /* use accent (blue) for line numbers */
+      border-right: 1px solid rgba(255,255,255,0.03);
     }
 
-    /* Gutter marker for lines modified since last save */
+    /* Gutter marker: modified (unsaved) and saved standard states */
+    .ace_gutter-cell {
+      /* ensure each gutter cell uses a consistent background and number color */
+      background: #061425 !important;
+      color: var(--accent) !important;
+    }
+
     .ace_gutter-cell.line-modified {
-      background: rgba(255,165,0,0.12);
-      border-left: 3px solid rgba(255,165,0,0.9);
+      background: rgba(255,165,0,0.10) !important; /* soft orange background */
+      border-left: 3px solid rgba(255,165,0,0.95); /* prominent orange bar for unsaved */
     }
     .ace_gutter-cell.line-saved {
-      background: rgba(34,197,94,0.07);
-      border-left: 3px solid rgba(34,197,94,0.9);
+      background: rgba(26,188,156,0.06); /* subtle greenish for saved lines */
+      border-left: 3px solid rgba(26,188,156,0.9);
+    }
+    /* Error marker in gutter (overrides modified if an error exists on that line) */
+    .ace_gutter-cell.line-error {
+      background: rgba(224,75,75,0.10); /* soft red */
+      border-left: 3px solid rgba(224,75,75,0.95); /* bright red bar for errors */
     }
 
     .ace_gutter .ace_cursor {
       color: #fff
     }
 
+    /* Selection when clicking + dragging (custom look requested) */
     .ace_marker-layer .ace_selection {
-      background: rgba(0, 87, 255, 0.12)
+      background: rgba(31,111,255,0.16) !important; /* blue-tinted selection */
+      box-shadow: inset 0 1px 0 rgba(0,0,0,0.35);
+      border-radius: 4px;
     }
 
     .ace_cursor {
@@ -166,37 +182,13 @@
     }
 
     /* Token colors to more closely match VS Code Dark+ */
-    .ace_editor .ace_keyword {
-      color: #c586c0
-    }
-
-    .ace_editor .ace_storage {
-      color: #569cd6
-    }
-
-    .ace_editor .ace_support {
-      color: #569cd6
-    }
-
-    .ace_editor .ace_constant {
-      color: #b5cea8
-    }
-
-    .ace_editor .ace_string {
-      color: #ce9178
-    }
-
-    .ace_editor .ace_comment {
-      color: #6a9955
-    }
-
-    .ace_editor .ace_variable {
-      color: #9cdcfe
-    }
-
-    .ace_editor .ace_identifier {
-      color: #dcdcaa
-    }
+    .ace_editor .ace_keyword { color: #78a0ff }
+    .ace_editor .ace_storage, .ace_editor .ace_support { color: #6ea0ff }
+    .ace_editor .ace_constant { color: #8fb4d8 }
+    .ace_editor .ace_string { color: #7fb3a7 }
+    .ace_editor .ace_comment { color: #6c83a3 }
+    .ace_editor .ace_variable { color: #9fc7ff }
+    .ace_editor .ace_identifier { color: #cfe3ff }
 
     .tab {
       display: flex;
@@ -296,7 +288,8 @@
     #editor-main {
       display: flex;
       flex: 1;
-      min-width: 0
+      min-width: 0;
+      position: relative;
     }
 
     #editor {
@@ -314,15 +307,21 @@
       padding: 8px;
       overflow: auto
     }
+    .outline-item:hover { background: rgba(255,255,255,0.02); color: #fff }
+    .outline-kind { color: #8aa6d0; font-weight:600; width:3.5em }
 
     #editor-header {
-      height: 32px;
+      height: 36px;
       display: flex;
       align-items: center;
-      padding: 4px 10px;
+      padding: 6px 10px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-      color: var(--muted)
+      color: var(--muted);
+      gap: 12px;
+      justify-content: space-between;
     }
+    #editor-breadcrumb { color: #d7e8ff; font-size:13px; display:flex; align-items:center; gap:8px }
+    #editor-breadcrumb .crumb { color: var(--muted); font-size:12px }
 
     #preview-container {
       width: 40%;
@@ -685,6 +684,15 @@
       border-radius: 6px;
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25) inset;
     }
+
+    /* Highlight for clicked term occurrences (ACE marker layer) */
+    /* Highlight for clicked term occurrences (ACE marker layer) */
+    .ace_marker-layer .ace_occurrence {
+      background: rgba(38,122,255,0.12); /* subtle blue highlight for token occurrences */
+      border-radius: 4px;
+      box-shadow: inset 0 1px 0 rgba(0,0,0,0.2);
+      outline: 1px solid rgba(38,122,255,0.12);
+    }
   </style>
 </head>
 
@@ -799,9 +807,10 @@
 
       <div id="content">
         <div id="editor-container">
-          <div id="editor-header"> <span id="editor-filename"></span> </div>
+          <div id="editor-header"> <div id="editor-breadcrumb"><span class="crumb">/</span> <span id="editor-filename"></span></div> </div>
           <div id="editor-main">
             <div id="editor"></div>
+            <div id="editor-placeholder" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:auto; cursor:pointer; color:var(--muted); font-size:15px;">Open or create a file.</div>
           </div>
         </div>
         <div id="splitter" role="separator" aria-orientation="vertical" title="Drag to resize" class="splitter" id="splitter-editor"></div>
@@ -883,6 +892,7 @@
     <div class="ctx-item conditional selection" data-action="cut" data-scope="both">Cut</div>
     <div class="ctx-item conditional selection" data-action="copy" data-scope="both">Copy</div>
     <div class="ctx-item conditional selection" data-action="paste" data-scope="both">Paste</div>
+    <div class="ctx-item conditional selection" data-action="changeAll" data-scope="both" style="display:none">Change All Occurrences</div>
     <div class="ctx-item" data-action="rename" data-scope="file">Rename</div>
     <div class="ctx-item" data-action="delete" data-scope="file">Delete</div>
     <div class="ctx-item" data-action="copyPath" data-scope="file">Copy Path</div>
