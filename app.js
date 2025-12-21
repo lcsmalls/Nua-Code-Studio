@@ -587,6 +587,7 @@
   }
   function saveToStorage(){
     localStorage.setItem(STORAGE_KEY, JSON.stringify(files))
+    updatePlayMenuVisibility()
   }
 
   // Settings persistence: remembers UI options like word wrap, autoRefresh, ui-scale and bottom height
@@ -807,8 +808,8 @@
   /* --- Euphonia multi-file playback (.huph/.euph) --- */
   const AudioCtx = new (window.AudioContext || window.webkitAudioContext)()
   const baseFreqs = { c:261.63, d:293.66, e:329.63, f:349.23, g:392, a:440, b:493.88 }
-  const DURATIONS = new Set(['crotchet','quaver','semiquaver','semiquavers','demisemiquaver','minim','semibreve'])
-  function durToSec(d,bpm){ if(!d) return 60/bpm/4; switch(d.toLowerCase()){ case 'crochet': case 'crotchet': return 60/bpm; case 'quaver': return 30/bpm; case 'semiquaver': case 'semiquavers': return 15/bpm; case 'demisemiquaver': return 7.5/bpm; case 'minim': return 120/bpm; case 'semibreve': case 'semibreve': return 240/bpm; default: return 60/bpm/4 } }
+  const DURATIONS = new Set(['crotchet','quaver','semiquaver','semiquavers','demisemiquaver','minim','semibreve','measure'])
+  function durToSec(d,bpm,timeSig){ if(!d) return 60/bpm/4; switch(d.toLowerCase()){ case 'crochet': case 'crotchet': return 60/bpm; case 'quaver': return 30/bpm; case 'semiquaver': case 'semiquavers': return 15/bpm; case 'demisemiquaver': return 7.5/bpm; case 'minim': return 120/bpm; case 'semibreve': case 'semibreve': return 240/bpm; case 'measure': return (timeSig.numerator / timeSig.denominator) * 240 / bpm; default: return 60/bpm/4 } }
   function isNoteToken(tok){ return /^[a-g][#`n]?\d$/i.test(tok) }
   function isDurationToken(tok){ return tok && DURATIONS.has(tok.toLowerCase()) }
   function noteFreq(note, keyAcc, accState){
@@ -873,8 +874,15 @@
   function stopPlayback(){ playbackState.stopRequested=true; playbackState.isPlaying=false; playbackState.isPaused=false; playbackState.currentOscillators.forEach(o=>{ try{o.stop()}catch(e){} }); playbackState.currentOscillators=[] }
   function pausePlayback(){ playbackState.isPaused=true; playbackState.isPlaying=false; playbackState.currentOscillators.forEach(o=>{ try{o.stop()}catch(e){} }); playbackState.currentOscillators=[] }
 
-  // show/hide Play menu based on active file
-  function updatePlayMenuVisibility(name){ try{ const playMenu = document.getElementById('menu-play'); if(!playMenu) return; if(name && name.toLowerCase().endsWith('.huph')) playMenu.style.display = ''; else playMenu.style.display = 'none' }catch(e){} }
+  // show/hide Play menu based on whether any .huph file exists in the project
+  function updatePlayMenuVisibility(){
+    try{
+      const playMenu = document.getElementById('menu-play');
+      if(!playMenu) return;
+      const hasHuph = Object.keys(files).some(name => name && name.toLowerCase().endsWith('.huph'));
+      playMenu.style.display = hasHuph ? '' : 'none';
+    }catch(e){}
+  }
   // wire Play menu actions
   try{
     const playAllBtn = document.getElementById('play-all-voices'); if(playAllBtn) playAllBtn.addEventListener('click', ()=>{ playAllVoicesForActiveHeader() })
@@ -882,10 +890,16 @@
     const stopBtnEl = document.getElementById('play-stop'); if(stopBtnEl) stopBtnEl.addEventListener('click', ()=> stopPlayback())
   }catch(e){}
 
-  // main orchestrator: when a .huph header is active, parse it and play referenced .euph files
+  // main orchestrator: find a .huph header and play referenced .euph files
   async function playAllVoicesForActiveHeader(){
-    if(!active || !active.toLowerCase().endsWith('.huph')){ showDialog('No header','Open a .huph header file to Play All'); return }
-    const headerText = (buffers[active] !== undefined) ? buffers[active] : (files[active] || '')
+    let headerFile = active && active.toLowerCase().endsWith('.huph') ? active : null
+    if(!headerFile){
+      // find any .huph file
+      const huphFiles = Object.keys(files).filter(name => name && name.toLowerCase().endsWith('.huph'))
+      if(huphFiles.length === 0){ showDialog('No header','No .huph header file found in project.'); return }
+      headerFile = huphFiles[0] // use the first one
+    }
+    const headerText = (buffers[headerFile] !== undefined) ? buffers[headerFile] : (files[headerFile] || '')
     const header = parseHuphText(headerText)
     if(!header){ showDialog('Invalid header','Could not parse the .huph header file. Expected JSON or newline list.'); return }
     // resolve basenames against stored files in memory; header paths may be basenames
@@ -939,7 +953,7 @@
     // play voices in parallel measure-by-measure similar to euph editor
     playbackState.stopRequested=false; playbackState.isPaused=false; playbackState.isPlaying=true; playbackState.currentOscillators=[]
 
-    // key signature map (copied from euph.html)
+    // key signature map 
     const keySignatures = {
       'C Major': [], 'C minor': ['B`', 'E`', 'A`'],
       'C# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#', 'B#'], 'C# minor': ['F#', 'C#', 'G#'],
@@ -949,7 +963,7 @@
       'E Major': ['F#', 'C#', 'G#', 'D#'], 'E minor': ['F#'],
       'F Major': ['B`'], 'F minor': ['B`', 'E`', 'A`', 'D`'],
       'F# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'], 'F# minor': ['F#', 'C#', 'G#'],
-      'G Major': ['F#'], 'G minor': ['B`', 'E`', 'A`'],
+      'G Major': ['F#'], 'G minor': ['B`', 'E`'],
       'G# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#', 'B#'], 'G# minor': ['F#', 'C#', 'G#', 'D#'],
       'A Major': ['F#', 'C#', 'G#'], 'A minor': [],
       'A# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'], 'A# minor': ['F#', 'C#', 'G#', 'D#'],
@@ -965,19 +979,25 @@
     function parseEditorContent(text){
       const rawLines = text.split('\n').map(l=>l.trim()).filter(Boolean)
       if(rawLines.length===0) return null
-      let key = 'C Major', bpm = 120
-      const headerMatch = rawLines[0] && rawLines[0].match(/\(?\s*([^,]+)\s*,\s*([0-9]+)bpm/i)
-      if(headerMatch){ key = headerMatch[1].trim(); bpm = parseInt(headerMatch[2],10) || 120 }
+      let key = 'C Major', bpm = 120, timeSig = {numerator:4, denominator:4}
+      const headerMatch = rawLines[0] && rawLines[0].match(/\(?\s*([^,]+)\s*,\s*([0-9]+)bpm(?:,\s*([0-9]+)\/([0-9]+))?/i)
+      if(headerMatch){ 
+        key = headerMatch[1].trim(); 
+        bpm = parseInt(headerMatch[2],10) || 120; 
+        if(headerMatch[3] && headerMatch[4]){
+          timeSig = {numerator: parseInt(headerMatch[3]), denominator: parseInt(headerMatch[4])};
+        }
+      }
       const keyAcc = keySignatures[key] || []
       const contentLines = headerMatch ? rawLines.slice(1) : rawLines
-      return { bpm, keyAcc, contentLines }
+      return { bpm, keyAcc, timeSig, contentLines }
     }
     function splitMeasures(lines){ return lines.flatMap(line => line.split('|').map(m=>m.trim()).filter(Boolean)) }
 
     const parsed = voices.map(v=>{ const p = parseEditorContent(v.content); return { meta:v, parsed:p, measures: splitMeasures(p.contentLines) } })
     const maxMeasures = Math.max(...parsed.map(p=>p.measures.length))
 
-    async function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart){
+    async function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig){
       if(!tokens || tokens.length===0) return 0
       // schedule notes precisely using AudioContext time to avoid JS timer lag
       // use provided anchorStart so all voices for the same measure share the same AudioContext reference
@@ -991,7 +1011,7 @@
       const isStaccatoDur = (d) => {
         if(!d) return false
         const dd = d.toLowerCase()
-        return dd === 'quaver' || dd === 'crochet' || dd === 'crotchet'
+        return dd === 'semiquaver' || dd === 'demisemiquaver'
       }
       function scheduleOsc(startAt, freq, playDur, wave, gain){
         return new Promise(resolve=>{
@@ -1027,8 +1047,7 @@
         if(t.toLowerCase() === 'rest'){
           const next = tokens[i+1]
           let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          if(measureDurOverride && ['quaver','semiquaver','minim','crochet','crotchet','demisemiquaver'].includes(measureDurOverride)) durTok = measureDurOverride
-          const baseDur = durToSec(durTok, bpm)
+          const baseDur = durToSec(durTok, bpm, timeSig)
           curTime += baseDur
           i += isDurationToken(next)? 2 : 1
           continue
@@ -1042,7 +1061,7 @@
             const group = []
             while(i<tokens.length && tokens[i] !== '-') { group.push(tokens[i]); i++ }
             if(tokens[i] === '-') i++
-            const baseDur = durToSec(base, bpm)
+            const baseDur = durToSec(base, bpm, timeSig)
             // for triplet: 3 * scaledDur == unitForTuplet
             let unitForTuplet = 'quaver'
             if(tupletType === 'triplet'){
@@ -1054,12 +1073,12 @@
             } else if(tupletType === 'septuplet'){
               unitForTuplet = base
             }
-            const scaledDur = durToSec(unitForTuplet, bpm) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : 7))
+            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : 7))
             for(const tok of group){
               if(playbackState.stopRequested) break
               if(isNoteToken(tok)){
                 const freq = noteFreq(tok, keyAcc, accState)
-                const playDur = isStaccatoDur(base) ? scaledDur * 0.5 : scaledDur
+                const playDur = isStaccatoDur(base) ? scaledDur * 0.9 : scaledDur
                 promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
                 curTime += scaledDur
               } else if(tok.toLowerCase() === 'rest'){
@@ -1073,9 +1092,8 @@
           const next = tokens[i+1]
           let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
           if(isDurationToken(next)) i += 2; else i += 1
-          if(measureDurOverride && ['quaver','semiquaver','minim','crochet','crotchet','demisemiquaver'].includes(measureDurOverride)) durTok = measureDurOverride
-          const baseDur = durToSec(durTok, bpm)
-          const playDur = isStaccatoDur(durTok) ? baseDur * 0.5 : baseDur
+          const baseDur = durToSec(durTok, bpm, timeSig)
+          const playDur = isStaccatoDur(durTok) ? baseDur * 0.9 : baseDur
           const freq = noteFreq(t, keyAcc, accState)
           promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
           curTime += baseDur
@@ -1103,7 +1121,7 @@
         let baseGain = 0.08
         if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
         const gain = baseGain * volMult
-        return playMeasure(tokens,bpm,keyAcc,wave,gain, measureAbsoluteTime)
+        return playMeasure(tokens,bpm,keyAcc,wave,gain, measureAbsoluteTime, p.parsed.timeSig)
       })
       const results = await Promise.all(tasks)
       // each playMeasure returns the scheduled duration for that voice's measure; advance anchor by the longest one
@@ -1296,7 +1314,7 @@
     // persist last-opened tabs / active file
     try{ settings.lastTabs = tabs.slice(); settings.lastActive = active; saveSettings() }catch(e){}
     // update Play menu visibility when opening a file
-    try{ if(typeof updatePlayMenuVisibility === 'function') updatePlayMenuVisibility(name) }catch(e){}
+    try{ if(typeof updatePlayMenuVisibility === 'function') updatePlayMenuVisibility() }catch(e){}
   }
 
   function closeTab(name){
