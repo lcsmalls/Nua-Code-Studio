@@ -1008,10 +1008,12 @@
       const promises = []
       const accState = {}
 
-      const isStaccatoDur = (d) => {
-        if(!d) return false
+      const staccatoPlayFraction = (d) => {
+        if(!d) return 1
         const dd = d.toLowerCase()
-        return dd === 'semiquaver' || dd === 'demisemiquaver'
+        if(dd === 'semiquaver' || dd === 'demisemiquaver') return 0.9
+        if(dd === 'quaver' || dd === 'crotchet' || dd === 'crochet') return 0.5
+        return 1
       }
       function scheduleOsc(startAt, freq, playDur, wave, gain){
         return new Promise(resolve=>{
@@ -1078,7 +1080,7 @@
               if(playbackState.stopRequested) break
               if(isNoteToken(tok)){
                 const freq = noteFreq(tok, keyAcc, accState)
-                const playDur = isStaccatoDur(base) ? scaledDur * 0.9 : scaledDur
+                const playDur = scaledDur * staccatoPlayFraction(base)
                 promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
                 curTime += scaledDur
               } else if(tok.toLowerCase() === 'rest'){
@@ -1093,7 +1095,7 @@
           let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
           if(isDurationToken(next)) i += 2; else i += 1
           const baseDur = durToSec(durTok, bpm, timeSig)
-          const playDur = isStaccatoDur(durTok) ? baseDur * 0.9 : baseDur
+          const playDur = baseDur * staccatoPlayFraction(durTok)
           const freq = noteFreq(t, keyAcc, accState)
           promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
           curTime += baseDur
