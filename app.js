@@ -29,6 +29,8 @@
       style = 'line'; linePrefix = '//'
     }else if(ext === 'py'){
       style = 'line'; linePrefix = '#'
+    }else if(ext === 'euph'){
+      style = 'block'; blockStart = '/*'; blockEnd = '*/'
     }else{
       // default to line comments when feasible
       style = 'line'; linePrefix = '//'
@@ -493,6 +495,8 @@
             { token: 'euph_command', regex: '\\b(' + commands.join('|') + ')\\b', caseInsensitive: true },
             { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
             { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
+            { token: 'euph_chord', regex: '\\[.*?\\]' },
+            { token: 'comment', regex: '/\\*[\\s\\S]*?\\*/' },
             { token: 'euph_rest', regex: '\\brest\\b', caseInsensitive: true },
             { token: 'euph_bar', regex: '\\|' },
             { token: 'euph_tupletp', regex: '-' },
@@ -521,6 +525,8 @@
                 { token: 'euph_command', regex: '\\b(' + commands.join('|') + ')\\b', caseInsensitive: true },
                 { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
                 { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
+                { token: 'euph_chord', regex: '\\[.*?\\]' },
+                { token: 'comment', regex: '/\\*[\\s\\S]*?\\*/' },
                 { token: 'euph_rest', regex: '\\brest\\b', caseInsensitive: true },
                 { token: 'euph_bar', regex: '\\|' },
                 { token: 'euph_tupletp', regex: '-' },
@@ -545,6 +551,8 @@
               .ace_editor .ace_euph_duration { color: #00bfff; }
               .ace_editor .ace_euph_command { color: #ff5555; }
               .ace_editor .ace_euph_rest { color: #ffcc66; }
+              .ace_editor .ace_euph_chord { color: #ffff00; }
+              .ace_editor .ace_comment { color: #888; }
               .ace_editor .ace_euph_bar, .ace_editor .ace_euph_tupletp { color: #ffffff; }
             `
             document.head.appendChild(s)
@@ -977,6 +985,7 @@
     }
 
     function parseEditorContent(text){
+      text = text.replace(/\/\*[\s\S]*?\*\//g, '')
       const rawLines = text.split('\n').map(l=>l.trim()).filter(Boolean)
       if(rawLines.length===0) return null
       let key = 'C Major', bpm = 120, timeSig = {numerator:4, denominator:4}
@@ -1001,19 +1010,17 @@
       if(!tokens || tokens.length===0) return 0
       // schedule notes precisely using AudioContext time to avoid JS timer lag
       // use provided anchorStart so all voices for the same measure share the same AudioContext reference
-      const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.02)
+      const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.01)
       let curTime = startNow
       let i = 0
       let measureDurOverride = null
       const promises = []
       const accState = {}
 
-      const staccatoPlayFraction = (d) => {
-        if(!d) return 1
+      const isStaccatoDur = (d) => {
+        if(!d) return false
         const dd = d.toLowerCase()
-        if(dd === 'semiquaver' || dd === 'demisemiquaver') return 0.9
-        if(dd === 'quaver' || dd === 'crotchet' || dd === 'crochet') return 0.5
-        return 1
+        return dd === 'semiquaver' || dd === 'demisemiquaver' || dd === 'quaver' || dd === 'crotchet'
       }
       function scheduleOsc(startAt, freq, playDur, wave, gain){
         return new Promise(resolve=>{
@@ -1026,7 +1033,7 @@
             g.gain.value = gain!==null? gain : 0.08
             o.connect(g); g.connect(AudioCtx.destination)
             playbackState.currentOscillators.push(o)
-            const startAtClamped = Math.max(startAt, AudioCtx.currentTime + 0.005)
+            const startAtClamped = Math.max(startAt, AudioCtx.currentTime + 0.001)
             o.start(startAtClamped)
             o.stop(startAtClamped + playDur)
             // resolve when oscillator ends to ensure accurate timing
@@ -1078,9 +1085,21 @@
             const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : 7))
             for(const tok of group){
               if(playbackState.stopRequested) break
-              if(isNoteToken(tok)){
+              if(tok.startsWith('[') && tok.endsWith(']')){
+                const pitches = tok.slice(1,-1).split(/\s+/).filter(Boolean)
+                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
+                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
+                for(const p of pitches){
+                  if(isNoteToken(p)){
+                    const freq = noteFreq(p, keyAcc, accState)
+                    promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+                  }
+                }
+                curTime += scaledDur
+              } else if(isNoteToken(tok)){
                 const freq = noteFreq(tok, keyAcc, accState)
-                const playDur = scaledDur * staccatoPlayFraction(base)
+                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
+                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
                 promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
                 curTime += scaledDur
               } else if(tok.toLowerCase() === 'rest'){
@@ -1091,13 +1110,41 @@
           }
         }
         if(isNoteToken(t)){
+          let forceFull = false
+          if(tokens[i+1] === 's'){
+            forceFull = true
+            i++
+          }
           const next = tokens[i+1]
           let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
           if(isDurationToken(next)) i += 2; else i += 1
           const baseDur = durToSec(durTok, bpm, timeSig)
-          const playDur = baseDur * staccatoPlayFraction(durTok)
+          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
+          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
           const freq = noteFreq(t, keyAcc, accState)
           promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+          curTime += baseDur
+          continue
+        }
+        if(t.startsWith('[') && t.endsWith(']')){
+          const pitches = t.slice(1,-1).split(/\s+/).filter(Boolean)
+          let forceFull = false
+          if(tokens[i+1] === 's'){
+            forceFull = true
+            i++
+          }
+          const next = tokens[i+1]
+          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
+          if(isDurationToken(next)) i += 2; else i += 1
+          const baseDur = durToSec(durTok, bpm, timeSig)
+          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
+          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
+          for(const p of pitches){
+            if(isNoteToken(p)){
+              const freq = noteFreq(p, keyAcc, accState)
+              promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+            }
+          }
           curTime += baseDur
           continue
         }
@@ -1112,10 +1159,10 @@
     }
 
     // schedule measures against a single advancing anchor so there is no extra gap between measures
-    let measureAbsoluteTime = AudioCtx.currentTime + 0.02
+    let measureAbsoluteTime = AudioCtx.currentTime + 0.01
     for(let m=0;m<maxMeasures;m++){
       const tasks = parsed.map(p=>{
-        const tokens = p.measures[m]? p.measures[m].split(/\s+/).filter(Boolean):[]
+        const tokens = p.measures[m]? (p.measures[m].match(/(\[.*?\]|[^\s\[\]]+)/g) || []) : []
         const bpm = p.parsed.bpm
         const keyAcc = p.parsed.keyAcc
         const wave = p.meta.wave
@@ -1130,7 +1177,7 @@
       try{
         const maxDur = Math.max(...(results.filter(r=>typeof r==='number' && isFinite(r)) || [0.001]))
         measureAbsoluteTime += (maxDur || 0.001)
-      }catch(e){ measureAbsoluteTime = AudioCtx.currentTime + 0.02 }
+      }catch(e){ measureAbsoluteTime = AudioCtx.currentTime + 0.01 }
     }
     playbackState.isPlaying=false
   }
@@ -1146,6 +1193,11 @@
         item.setAttribute('data-action','toggleMultiEdit')
         item.textContent = 'Toggle Multi-edit'
         dd.appendChild(item)
+        const tidyItem = document.createElement('div')
+        tidyItem.className = 'item'
+        tidyItem.setAttribute('data-action','tidyEuph')
+        tidyItem.textContent = 'Tidy Euph Code'
+        dd.appendChild(tidyItem)
       }
     }
   }catch(e){ console.warn('add multi-edit menu failed', e) }
@@ -2321,6 +2373,22 @@
           saveSettings()
           updateStatus('Multi-edit ' + (settings.multiEdit? 'enabled':'disabled'))
         }catch(e){ console.error('toggleMultiEdit', e) }
+        break
+      }
+      case 'tidyEuph':{
+        try{
+          if(!active || !active.toLowerCase().endsWith('.euph')) { showDialog('Tidy','Only works on .euph files'); break }
+          const content = files[active] || ''
+          const lines = content.split('\n').map(l=>l.trim()).filter(Boolean)
+          if(lines.length === 0) break
+          const header = lines[0]
+          const measures = lines.slice(1).flatMap(line => line.split('|').map(m=>m.trim()).filter(Boolean))
+          const newContent = header + '\n' + measures.join(' |\n') + ' |'
+          files[active] = newContent
+          if(editor) editor.setValue(newContent, -1)
+          scheduleDirtyUpdate()
+          updateStatus('Euph code tidied')
+        }catch(e){ console.error('tidyEuph', e) }
         break
       }
       case 'save': saveCurrent(); break
