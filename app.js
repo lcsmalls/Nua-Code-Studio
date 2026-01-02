@@ -3366,6 +3366,6 @@
   })
 
   // expose for debug
-  window.miniVSC = { files, openFile, saveCurrent, runPreview }
+  window.miniVSC = { files, openFile, saveCurrent }
 
 })();
