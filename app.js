@@ -488,11 +488,15 @@
       const TextHighlightRules = ace.require('ace/mode/text_highlight_rules').TextHighlightRules
 
       const EuphHighlightRules = function(){
-        const commands = ['tremolo','rest','measure','triplet','quintuplet','septuplet','semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure']
+        const measureDurations = 'semiquaver|quaver|minim|crochet|crotchet|demisemiquaver'
+        const tuplets = 'triplet|quintuplet|sextuplet|septuplet|octuplet|nontuplet|dectuplet|undectuplet|duodectuplet'
+        const otherCommands = 'tremolo|measure'
         const durations = Array.from(DURATIONS).join('|')
         this.$rules = {
           start: [
-            { token: 'euph_command', regex: '\\b(' + commands.join('|') + ')\\b', caseInsensitive: true },
+            { token: 'euph_measure_duration', regex: '\\b(' + measureDurations + ')Measure\\b', caseInsensitive: true },
+            { token: 'euph_tuplet', regex: '\\b(' + tuplets + ')\\b', caseInsensitive: true },
+            { token: 'euph_command', regex: '\\b(' + otherCommands + ')\\b', caseInsensitive: true },
             { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
             { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
             { token: 'euph_chord', regex: '\\[.*?\\]' },
@@ -518,11 +522,15 @@
           const TextMode = require('ace/mode/text').Mode
           const TextHighlightRules = require('ace/mode/text_highlight_rules').TextHighlightRules
           function EuphHighlightRulesLocal(){
-            const commands = ['tremolo','rest','measure','triplet','quintuplet','septuplet','semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure']
+            const measureDurations = 'semiquaver|quaver|minim|crochet|crotchet|demisemiquaver'
+            const tuplets = 'triplet|quintuplet|sextuplet|septuplet|octuplet|nontuplet|dectuplet|undectuplet|duodectuplet'
+            const otherCommands = 'tremolo|measure'
             const durations = Array.from(DURATIONS).join('|')
             this.$rules = {
               start: [
-                { token: 'euph_command', regex: '\\b(' + commands.join('|') + ')\\b', caseInsensitive: true },
+                { token: 'euph_measure_duration', regex: '\\b(' + measureDurations + ')Measure\\b', caseInsensitive: true },
+                { token: 'euph_tuplet', regex: '\\b(' + tuplets + ')\\b', caseInsensitive: true },
+                { token: 'euph_command', regex: '\\b(' + otherCommands + ')\\b', caseInsensitive: true },
                 { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
                 { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
                 { token: 'euph_chord', regex: '\\[.*?\\]' },
@@ -549,9 +557,11 @@
             s.textContent = `
               .ace_editor .ace_euph_pitch { color: #00ff00; }
               .ace_editor .ace_euph_duration { color: #00bfff; }
-              .ace_editor .ace_euph_command { color: #ff5555; }
-              .ace_editor .ace_euph_rest { color: #ffcc66; }
-              .ace_editor .ace_euph_chord { color: #ffff00; }
+              .ace_editor .ace_euph_measure_duration { color: #ff5555; }
+              .ace_editor .ace_euph_tuplet { color: #ff00ff; }
+              .ace_editor .ace_euph_command { color: #ffa500; }
+              .ace_editor .ace_euph_rest { color: #ffff00; }
+              .ace_editor .ace_euph_chord { color: #00ffff; }
               .ace_editor .ace_comment { color: #888; }
               .ace_editor .ace_euph_bar, .ace_editor .ace_euph_tupletp { color: #ffffff; }
             `
@@ -817,7 +827,13 @@
   const AudioCtx = new (window.AudioContext || window.webkitAudioContext)()
   const baseFreqs = { c:261.63, d:293.66, e:329.63, f:349.23, g:392, a:440, b:493.88 }
   const DURATIONS = new Set(['crotchet','quaver','semiquaver','semiquavers','demisemiquaver','minim','semibreve','measure'])
-  function durToSec(d,bpm,timeSig){ if(!d) return 60/bpm/4; switch(d.toLowerCase()){ case 'crochet': case 'crotchet': return 60/bpm; case 'quaver': return 30/bpm; case 'semiquaver': case 'semiquavers': return 15/bpm; case 'demisemiquaver': return 7.5/bpm; case 'minim': return 120/bpm; case 'semibreve': case 'semibreve': return 240/bpm; case 'measure': return (timeSig.numerator / timeSig.denominator) * 240 / bpm; default: return 60/bpm/4 } }
+  function calculateMeasureDuration(timeSig, bpm){
+    if(!timeSig || !timeSig.numerator || !timeSig.denominator) return 2 // default 2 seconds
+    const beats = timeSig.numerator
+    const beatType = timeSig.denominator
+    const beatDuration = (60 / bpm) * (4 / beatType) // assuming 4 is crotchet
+    return beats * beatDuration
+  }
   function isNoteToken(tok){ return /^[a-g][#`n]?\d$/i.test(tok) }
   function isDurationToken(tok){ return tok && DURATIONS.has(tok.toLowerCase()) }
   function noteFreq(note, keyAcc, accState){
@@ -900,6 +916,13 @@
 
   // main orchestrator: find a .huph header and play referenced .euph files
   async function playAllVoicesForActiveHeader(){
+    console.log('Starting playAllVoicesForActiveHeader')
+    try{
+      await AudioCtx.resume()
+      console.log('AudioContext resumed')
+    }catch(e){ console.warn('AudioContext resume failed', e) }
+
+    function durToSec(d,bpm,timeSig){ if(!d) return 60/bpm/4; switch(d.toLowerCase()){ case 'crochet': case 'crotchet': return 60/bpm; case 'quaver': return 30/bpm; case 'semiquaver': case 'semiquavers': return 15/bpm; case 'demisemiquaver': return 7.5/bpm; case 'minim': return 120/bpm; case 'semibreve': case 'semibreve': return 240/bpm; case 'measure': return (timeSig.numerator / timeSig.denominator) * 240 / bpm; default: return 60/bpm/4 } }
     let headerFile = active && active.toLowerCase().endsWith('.huph') ? active : null
     if(!headerFile){
       // find any .huph file
@@ -1005,16 +1028,15 @@
 
     const parsed = voices.map(v=>{ const p = parseEditorContent(v.content); return { meta:v, parsed:p, measures: splitMeasures(p.contentLines) } })
     const maxMeasures = Math.max(...parsed.map(p=>p.measures.length))
+    console.log('Parsed', parsed.length, 'voices, maxMeasures', maxMeasures)
 
-    async function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig){
-      if(!tokens || tokens.length===0) return 0
-      // schedule notes precisely using AudioContext time to avoid JS timer lag
-      // use provided anchorStart so all voices for the same measure share the same AudioContext reference
+    function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig){
+      if(!tokens || tokens.length===0) return
+      // schedule notes precisely using AudioContext time
       const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.01)
       let curTime = startNow
       let i = 0
       let measureDurOverride = null
-      const promises = []
       const accState = {}
 
       const isStaccatoDur = (d) => {
@@ -1023,31 +1045,26 @@
         return dd === 'semiquaver' || dd === 'demisemiquaver' || dd === 'quaver' || dd === 'crotchet'
       }
       function scheduleOsc(startAt, freq, playDur, wave, gain){
-        return new Promise(resolve=>{
-          try{
-            if(playbackState.stopRequested || playbackState.isPaused) return resolve()
-            const o = AudioCtx.createOscillator()
-            const g = AudioCtx.createGain()
-            o.type = wave
-            o.frequency.value = freq
-            g.gain.value = gain!==null? gain : 0.08
-            o.connect(g); g.connect(AudioCtx.destination)
-            playbackState.currentOscillators.push(o)
-            const startAtClamped = Math.max(startAt, AudioCtx.currentTime + 0.001)
-            o.start(startAtClamped)
-            o.stop(startAtClamped + playDur)
-            // resolve when oscillator ends to ensure accurate timing
-            o.onended = function(){
-              try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}
-              resolve()
-            }
-          }catch(e){ resolve() }
-        })
+        try{
+          if(playbackState.stopRequested || playbackState.isPaused) return
+          const o = AudioCtx.createOscillator()
+          const g = AudioCtx.createGain()
+          o.type = wave
+          o.frequency.value = freq
+          g.gain.value = gain!==null? gain : 0.08
+          o.connect(g); g.connect(AudioCtx.destination)
+          playbackState.currentOscillators.push(o)
+          const startAtClamped = Math.max(startAt, AudioCtx.currentTime + 0.001)
+          o.start(startAtClamped)
+          o.stop(startAtClamped + playDur)
+          o.onended = function(){
+            try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}
+          }
+        }catch(e){}
       }
 
       while(i<tokens.length){
         if(playbackState.stopRequested) break
-        while(playbackState.isPaused) await new Promise(r=>setTimeout(r,100))
         const t = tokens[i]
         if(!t){ i++; continue }
         if(['semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure'].includes(t)){
@@ -1061,7 +1078,7 @@
           i += isDurationToken(next)? 2 : 1
           continue
         }
-        if(['triplet','quintuplet','septuplet'].includes(t.toLowerCase())){
+        if(['triplet','quintuplet','sextuplet','septuplet','octuplet','nontuplet','dectuplet','undectuplet','duodectuplet'].includes(t.toLowerCase())){
           const tupletType = t.toLowerCase()
           const base = tokens[i+1]
           i += 2
@@ -1071,7 +1088,6 @@
             while(i<tokens.length && tokens[i] !== '-') { group.push(tokens[i]); i++ }
             if(tokens[i] === '-') i++
             const baseDur = durToSec(base, bpm, timeSig)
-            // for triplet: 3 * scaledDur == unitForTuplet
             let unitForTuplet = 'quaver'
             if(tupletType === 'triplet'){
               if(base.toLowerCase().startsWith('semiquaver')) unitForTuplet = 'quaver'
@@ -1082,7 +1098,7 @@
             } else if(tupletType === 'septuplet'){
               unitForTuplet = base
             }
-            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : 7))
+            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : (tupletType === 'sextuplet' ? 6 : (tupletType === 'septuplet' ? 7 : (tupletType === 'octuplet' ? 8 : (tupletType === 'nontuplet' ? 9 : (tupletType === 'dectuplet' ? 10 : (tupletType === 'undectuplet' ? 11 : (tupletType === 'duodectuplet' ? 12 : 3)))))))))
             for(const tok of group){
               if(playbackState.stopRequested) break
               if(tok.startsWith('[') && tok.endsWith(']')){
@@ -1092,7 +1108,7 @@
                 for(const p of pitches){
                   if(isNoteToken(p)){
                     const freq = noteFreq(p, keyAcc, accState)
-                    promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+                    scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
                   }
                 }
                 curTime += scaledDur
@@ -1100,7 +1116,7 @@
                 const freq = noteFreq(tok, keyAcc, accState)
                 const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
                 const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
-                promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+                scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
                 curTime += scaledDur
               } else if(tok.toLowerCase() === 'rest'){
                 curTime += scaledDur
@@ -1122,7 +1138,7 @@
           const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
           const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
           const freq = noteFreq(t, keyAcc, accState)
-          promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+          scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
           curTime += baseDur
           continue
         }
@@ -1142,7 +1158,7 @@
           for(const p of pitches){
             if(isNoteToken(p)){
               const freq = noteFreq(p, keyAcc, accState)
-              promises.push(scheduleOsc(curTime, freq, playDur, waveType, gainOverride))
+              scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
             }
           }
           curTime += baseDur
@@ -1150,18 +1166,15 @@
         }
         i++
       }
-      const total = Math.max(0, curTime - startNow)
-      await Promise.all(promises)
-      // ensure full measure time elapses (accounts for staccato where oscillators ended early)
-      const waitMs = Math.max(0, Math.round((curTime - AudioCtx.currentTime) * 1000))
-      if(waitMs > 0) await new Promise(r=> setTimeout(r, waitMs))
-      return total
     }
 
     // schedule measures against a single advancing anchor so there is no extra gap between measures
-    let measureAbsoluteTime = AudioCtx.currentTime + 0.01
+    let currentTime = AudioCtx.currentTime + 0.01
+    console.log('Starting scheduling at', currentTime)
     for(let m=0;m<maxMeasures;m++){
-      const tasks = parsed.map(p=>{
+      console.log('Scheduling measure', m)
+      const durations = []
+      parsed.forEach(p=>{
         const tokens = p.measures[m]? (p.measures[m].match(/(\[.*?\]|[^\s\[\]]+)/g) || []) : []
         const bpm = p.parsed.bpm
         const keyAcc = p.parsed.keyAcc
@@ -1170,16 +1183,16 @@
         let baseGain = 0.08
         if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
         const gain = baseGain * volMult
-        return playMeasure(tokens,bpm,keyAcc,wave,gain, measureAbsoluteTime, p.parsed.timeSig)
+        playMeasure(tokens,bpm,keyAcc,wave,gain, currentTime, p.parsed.timeSig)
+        const dur = calculateMeasureDuration(p.parsed.timeSig, p.parsed.bpm)
+        durations.push(dur)
       })
-      const results = await Promise.all(tasks)
-      // each playMeasure returns the scheduled duration for that voice's measure; advance anchor by the longest one
-      try{
-        const maxDur = Math.max(...(results.filter(r=>typeof r==='number' && isFinite(r)) || [0.001]))
-        measureAbsoluteTime += (maxDur || 0.001)
-      }catch(e){ measureAbsoluteTime = AudioCtx.currentTime + 0.01 }
+      const maxDur = Math.max(...durations)
+      console.log('Measure', m, 'maxDur', maxDur)
+      currentTime += maxDur
     }
     playbackState.isPlaying=false
+    console.log('Playback scheduled')
   }
 
   // Add Multi-edit toggle into the Selection menu (provides multi-cursor support)
