@@ -1030,6 +1030,205 @@
     const maxMeasures = Math.max(...parsed.map(p=>p.measures.length))
     console.log('Parsed', parsed.length, 'voices, maxMeasures', maxMeasures)
 
+    function collectMeasureEvents(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig, events){
+      if(!tokens || tokens.length===0) return
+      // collect note events with precise timing
+      const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.01)
+      let curTime = startNow
+      let i = 0
+      let measureDurOverride = null
+      const accState = {}
+
+      const isStaccatoDur = (d) => {
+        if(!d) return false
+        const dd = d.toLowerCase()
+        return dd === 'semiquaver' || dd === 'demisemiquaver' || dd === 'quaver' || dd === 'crotchet'
+      }
+
+      while(i<tokens.length){
+        if(playbackState.stopRequested) break
+        const t = tokens[i]
+        if(!t){ i++; continue }
+        if(['semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure'].includes(t)){
+          measureDurOverride = t.replace('Measure','').toLowerCase(); i++; continue
+        }
+        if(t.toLowerCase() === 'rest'){
+          const next = tokens[i+1]
+          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
+          const baseDur = durToSec(durTok, bpm, timeSig)
+          curTime += baseDur
+          i += isDurationToken(next)? 2 : 1
+          continue
+        }
+        if(['triplet','quintuplet','sextuplet','septuplet','octuplet','nontuplet','dectuplet','undectuplet','duodectuplet'].includes(t.toLowerCase())){
+          const tupletType = t.toLowerCase()
+          const base = tokens[i+1]
+          i += 2
+          if(tokens[i] === '-'){
+            i++
+            const group = []
+            while(i<tokens.length && tokens[i] !== '-') { group.push(tokens[i]); i++ }
+            if(tokens[i] === '-') i++
+            const baseDur = durToSec(base, bpm, timeSig)
+            let unitForTuplet = 'quaver'
+            if(tupletType === 'triplet'){
+              if(base.toLowerCase().startsWith('semiquaver')) unitForTuplet = 'quaver'
+              else if(base.toLowerCase().startsWith('quaver')) unitForTuplet = 'crochet'
+              else unitForTuplet = 'quaver'
+            } else if(tupletType === 'quintuplet'){
+              unitForTuplet = base
+            } else if(tupletType === 'septuplet'){
+              unitForTuplet = base
+            }
+            const tupletDivisors = {
+              'triplet': 3,
+              'quintuplet': 5,
+              'sextuplet': 6,
+              'septuplet': 7,
+              'octuplet': 8,
+              'nontuplet': 9,
+              'dectuplet': 10,
+              'undectuplet': 11,
+              'duodectuplet': 12
+            }
+            const divisor = tupletDivisors[tupletType] || 3
+            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / divisor
+            for(const tok of group){
+              if(playbackState.stopRequested) break
+              if(tok.startsWith('[') && tok.endsWith(']')){
+                const pitches = tok.slice(1,-1).split(/\s+/).filter(Boolean)
+                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
+                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
+                for(const p of pitches){
+                  if(isNoteToken(p)){
+                    const freq = noteFreq(p, keyAcc, accState)
+                    events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
+                  }
+                }
+                curTime += scaledDur
+              } else if(isNoteToken(tok)){
+                const freq = noteFreq(tok, keyAcc, accState)
+                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
+                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
+                events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
+                curTime += scaledDur
+              } else if(tok.toLowerCase() === 'rest'){
+                curTime += scaledDur
+              }
+            }
+            continue
+          }
+        }
+        if(isNoteToken(t)){
+          let forceFull = false
+          if(tokens[i+1] === 's'){
+            forceFull = true
+            i++
+          }
+          const next = tokens[i+1]
+          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
+          if(isDurationToken(next)) i += 2; else i += 1
+          const baseDur = durToSec(durTok, bpm, timeSig)
+          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
+          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
+          const freq = noteFreq(t, keyAcc, accState)
+          events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
+          curTime += baseDur
+          continue
+        }
+        if(t.startsWith('[') && t.endsWith(']')){
+          const pitches = t.slice(1,-1).split(/\s+/).filter(Boolean)
+          let forceFull = false
+          if(tokens[i+1] === 's'){
+            forceFull = true
+            i++
+          }
+          const next = tokens[i+1]
+          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
+          if(isDurationToken(next)) i += 2; else i += 1
+          const baseDur = durToSec(durTok, bpm, timeSig)
+          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
+          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
+          for(const p of pitches){
+            if(isNoteToken(p)){
+              const freq = noteFreq(p, keyAcc, accState)
+              events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
+            }
+          }
+          curTime += baseDur
+          continue
+        }
+        i++
+      }
+    }
+
+    function createVoiceOscillator(events, waveType, baseGain, totalDuration){
+      if(events.length === 0) return
+
+      try{
+        const o = AudioCtx.createOscillator()
+        const g = AudioCtx.createGain()
+        o.type = waveType
+        o.frequency.value = 440 // default frequency
+        g.gain.value = 0 // start silent
+        o.connect(g)
+        g.connect(AudioCtx.destination)
+        playbackState.currentOscillators.push(o)
+
+        const startTime = AudioCtx.currentTime + 0.01
+        const endTime = startTime + totalDuration
+
+        // Sort events by start time
+        events.sort((a, b) => a.startTime - b.startTime)
+
+        // Create a list of all gain change events (start and end)
+        const gainEvents = []
+        for(const event of events){
+          gainEvents.push({ time: event.startTime, gain: event.gain, type: 'start' })
+          gainEvents.push({ time: event.endTime, gain: 0, type: 'end' })
+        }
+
+        // Sort gain events by time
+        gainEvents.sort((a, b) => a.time - b.time)
+
+        // Schedule frequency and gain changes
+        let activeNotes = 0
+        let currentGain = 0
+
+        for(const event of events){
+          // Set frequency at event start
+          o.frequency.setValueAtTime(event.freq, event.startTime)
+        }
+
+        // Schedule gain changes based on note overlaps
+        for(const gainEvent of gainEvents){
+          if(gainEvent.type === 'start'){
+            activeNotes++
+            if(activeNotes === 1){ // First note starting
+              g.gain.setValueAtTime(gainEvent.gain, gainEvent.time)
+              currentGain = gainEvent.gain
+            }
+          } else { // end
+            activeNotes--
+            if(activeNotes === 0){ // Last note ending
+              g.gain.setValueAtTime(0, gainEvent.time)
+              currentGain = 0
+            }
+          }
+        }
+
+        // Start and stop the oscillator
+        o.start(startTime)
+        o.stop(endTime)
+
+        o.onended = function(){
+          try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}
+        }
+      }catch(e){
+        console.warn('Failed to create voice oscillator:', e)
+      }
+    }
+
     function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig){
       if(!tokens || tokens.length===0) return
       // schedule notes precisely using AudioContext time
@@ -1168,13 +1367,16 @@
       }
     }
 
+    // Collect all note events for each voice instead of creating oscillators immediately
+    const voiceEvents = parsed.map(() => ({ events: [] }))
+
     // schedule measures against a single advancing anchor so there is no extra gap between measures
     let currentTime = AudioCtx.currentTime + 0.01
     console.log('Starting scheduling at', currentTime)
     for(let m=0;m<maxMeasures;m++){
       console.log('Scheduling measure', m)
       const durations = []
-      parsed.forEach(p=>{
+      parsed.forEach((p, voiceIndex)=>{
         const tokens = p.measures[m]? (p.measures[m].match(/(\[.*?\]|[^\s\[\]]+)/g) || []) : []
         const bpm = p.parsed.bpm
         const keyAcc = p.parsed.keyAcc
@@ -1183,7 +1385,7 @@
         let baseGain = 0.08
         if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
         const gain = baseGain * volMult
-        playMeasure(tokens,bpm,keyAcc,wave,gain, currentTime, p.parsed.timeSig)
+        collectMeasureEvents(tokens, bpm, keyAcc, wave, gain, currentTime, p.parsed.timeSig, voiceEvents[voiceIndex].events)
         const dur = calculateMeasureDuration(p.parsed.timeSig, p.parsed.bpm)
         durations.push(dur)
       })
@@ -1191,6 +1393,22 @@
       console.log('Measure', m, 'maxDur', maxDur)
       currentTime += maxDur
     }
+
+    // Now create oscillators and schedule automation
+    const totalDuration = currentTime - (AudioCtx.currentTime + 0.01)
+    voiceEvents.forEach((voice, voiceIndex) => {
+      const p = parsed[voiceIndex]
+      const wave = p.meta.wave
+      const volMult = (p.meta && typeof p.meta.volume === 'number') ? p.meta.volume : 1
+      let baseGain = 0.08
+      if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
+      const gain = baseGain * volMult
+
+      if(voice.events.length > 0) {
+        createVoiceOscillator(voice.events, wave, gain, totalDuration)
+      }
+    })
+
     playbackState.isPlaying=false
     console.log('Playback scheduled')
   }
