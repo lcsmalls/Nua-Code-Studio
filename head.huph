@@ -1,0 +1,9 @@
+{
+  "voiceJson": "voices.json",
+  "euphFiles": [
+    "1.euph",
+    "2.euph",
+    "3.euph",
+    "4.euph"
+  ]
+}
