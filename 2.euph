@@ -1,97 +1,98 @@
 (D minor, 125bpm, 4/4)
 
-semiquaverMeasure d3 s rest d4 s rest c4 s rest b3 s rest a3 g3 a3 b3 a3 g3 f3 e3 |
-d3 semiquaver c3 semiquaver d3 semiquaver e`3 semiquaver d3 semiquaver c3 semiquaver bn2 semiquaver a2 semiquaver g2 s minim |
-g2 s minim g2 quaver f2 semiquaver e2 semiquaver f2 quaver b2 quaver |
-quaverMeasure a2 g2 a2 a2 d2 d3 c3 bn2 |
-a2 quaver a3 quaver g3 quaver f3 quaver e3 semiquaver d3 semiquaver e3 semiquaver f3 semiquaver e3 semiquaver d3 semiquaver c3 semiquaver bn2 semiquaver |
-semiquaverMeasure a2 g#2 a2 bn2 a2 gn2 f2 e2 d2 c#3 d3 e3 d3 cn3 b2 a2 |
-g#2 crotchet rest d3 crotchet c3 semiquaver bn2 semiquaver c3 quaver f3 quaver |
-e3 quaver d3 quaver e3 quaver e2 quaver a2 crotchet rest crotchet | 
 rest measure |
-d3 semiquaver e3 semiquaver f3 semiquaver g3 semiquaver a3 quaver d4 quaver c#4 quaver a3 quaver e3 quaver g3 quaver | f#3 quaver d3 quaver c4 s crotchet c4 quaver bn3 semiquaver a3 semiquaver b3 quaver g3 quaver |
-quaverMeasure e3 g3 b3 d3 c#3 a3 d3 g3 |
-f3 crotchet e3 crotchet d3 semiquaver c#3 semiquaver d3 semiquaver e3 semiquaver f3 semiquaver g3 semiquaver a3 semiquaver bn3 semiquaver |
-c#4 semiquaver bn3 semiquaver a3 semiquaver b3 semiquaver c4 semiquaver a3 semiquaver b3 semiquaver c4 semiquaver d4 s minim |
-d4 semiquaver c4 semiquaver bn3 semiquaver a3 semiquaver b3 semiquaver g3 semiquaver a3 semiquaver b3 semiquaver c4 s minim |
-semiquaverMeasure c4 b3 a3 b3 c4 d4 e`4 c4 d4 e4 d4 c4 b3 a3 g3 f#3 |
-semiquaverMeasure g3 f3 e3 d3 c#3 a2 d3 cn3 b2 d3 c#3 d3 e3 f3 g3 e3 |
-f3 semiquaver e3 semiquaver d3 semiquaver e3 semiquaver f3 semiquaver e3 semiquaver f3 semiquaver g3 semiquaver a3 s minim |
-a3 semiquaver g3 semiquaver f#3 semiquaver e3 semiquaver f3 semiquaver d3 semiquaver e3 semiquaver f3 semiquaver g3 s minim |
-semiquaverMeasure g3 f3 e3 f3 g3 a3 b3 g3 a3 b3 a3 g3 f3 e3 d3 c#3 |
-d3 quaver b2 quaver g2 quaver a2 quaver d2 s crotchet rest crotchet | 
-  
-quaverMeasure d3 s rest a2 s rest d2 s rest rest rest |
-quaverMeasure g2 s rest d3 s rest g3 s rest rest rest |
-quaverMeasure c4 s rest f3 s rest b3 s rest e3 s rest |
-quaverMeasure a3 s rest d3 s rest a3 e3 c#3 a2 |
-quaverMeasure d3 s rest a2 s rest d2 s rest rest rest |
-quaverMeasure g2 s rest d3 s rest g3 s rest rest rest |
-quaverMeasure c4 s rest f3 s rest b3 s rest e3 s rest |
-quaverMeasure a3 s rest d3 s rest a3 e3 c#3 a2 |
-quaverMeasure d3 rest rest rest g3 d3 bn2 g2 |
-quaverMeasure c3 rest rest rest f3 c3 f2 a2 |
-quaverMeasure b2 d3 bn2 g2 c3 e3 c#3 a2 |
-quaverMeasure d3 rest rest d2 e2 rest rest e3 |
-f3 quaver rest crotchet d3 quaver bn2 quaver bn3 semiquaver c4 semiquaver d4 quaver b3 quaver |
-e3 quaver rest crotchet c#3 quaver a2 quaver a3 semiquaver bn3 semiquaver c#4 quaver a3 quaver |
-quaverMeasure d3 rest rest d4 c4 rest rest c3 |
-quaverMeasure f3 rest rest f2 e2 rest rest rest | 
+rest measure |
+rest measure |
+rest measure |
+a4 semiquaver bn4 semiquaver c5 semiquaver d5 semiquaver e5 quaver a5 quaver g#5 quaver e5 quaver b4 quaver d5 quaver |
+c#5 quaver a4 quaver g5 s crotchet g5 quaver f#5 semiquaver e5 semiquaver f5 quaver d5 quaver |
+quaverMeasure bn4 d5 f5 a4 g#4 e5 a4 d5 | 
+c5 crotchet bn4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver a4 semiquaver g#4 semiquaver a4 semiquaver b4 semiquaver c5 semiquaver d5 semiquaver e5 semiquaver f5 semiquaver |
+g5 quaver g4 quaver g5 s crotchet g5 quaver e5 quaver a4 quaver g5 quaver |
+f5 semiquaver e5 semiquaver d5 semiquaver e5 semiquaver f5 semiquaver e5 semiquaver f5 semiquaver g5 semiquaver a5 s minim |
+a5 s semiquaver g5 semiquaver f#5 semiquaver e5 semiquaver f5 semiquaver d5 semiquaver e5 semiquaver f5 semiquaver g5 s minim |
+semiquaverMeasure g5 f5 e5 f5 g5 a5 b5 g5 a5 b5 a5 g5 f5 e5 d5 c#5 | 
+d5 quaver d6 crotchet c#6 quaver d6 crotchet rest quaver f5 quaver | 
+e5 quaver a5 quaver a4 s crotchet a4 quaver d5 semiquaver e5 semiquaver f#5 semiquaver  g5 semiquaver a5 semiquaver f5 semiquaver |
+g5 quaver d5 semiquaver c5 semiquaver d5 semiquaver bn4 semiquaver c5 semiquaver d5 semiquaver g4 quaver c5 quaver g5 s crotchet |
+g5 quaver f#5 semiquaver g5 semiquaver a5 quaver c5 s quaver c5 quaver b4 semiquaver c5 semiquaver d5 quaver a5 s quaver |
+a5 quaver g5 crotchet f5 s quaver f5 quaver e5 semiquaver d5 semiquaver c#5 semiquaver d5 semiquaver bn4 semiquaver c5 semiquaver |
+d5 semiquaver e5 semiquaver f5 semiquaver g5 semiquaver a5 quaver d6 quaver c#6 quaver a5 quaver e5 quaver g5 quaver |
+f#5 quaver d5 quaver c6 s crotchet c6 quaver bn5 semiquaver a5 semiquaver b5 quaver g5 quaver |
+quaverMeasure e5 g5 b5 d5 c#5 a5 d5 g5 |
+f5 crotchet e5 s demisemiquaver f5 s demisemiquaver e5 s demisemiquaver f5 s demisemiquaver e5 s demisemiquaver f5 s demisemiquaver e5 s demisemiquaver f5 s demisemiquaver d5 quaver c5 semiquaver b4 semiquaver a4 semiquaver g4 semiquaver f4 semiquaver e4 semiquaver | 
 
-quaverMeasure a3 s rest e3 s rest a2 s rest rest rest |
-quaverMeasure d3 s rest a2 s rest d2 s rest rest rest |
-quaverMeasure g2 s rest c3 s rest f3 s rest bn2 s rest |
-quaverMeasure e3 s rest a2 s rest e3 bn2 g#2 e2 |
-quaverMeasure a2 s rest e3 s rest a3 s rest rest rest |
-quaverMeasure d3 s rest a2 s rest d2 s rest rest rest |
-quaverMeasure g3 s rest c3 s rest f3 s rest bn2 s rest |
-quaverMeasure e3 s rest a2 s rest e3 e2 f#2 e2 |
-semiquaverMeasure a2 rest a3 rest g3 rest f3 rest e3 d3 e3 f3 e3 d3 c#3 bn2 |
-semiquaverMeasure a2 g#2 a2 bn2 a2 gn2 f#2 e2 d2 c#3 d3 e3 d3 cn3 b2 a2 |
-g#2 crotchet rest quaver d3 s quaver d3 quaver c4 semiquaver bn2 semiquaver c3 quaver f3 quaver |
-quaverMeasure e3 d3 e3 e2 a2 a3 g#3 e3 | 
+f4 quaver a5 quaver e4 quaver g5 quaver d4 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver b4 semiquaver a4 semiquaver |
+b4 quaver d6 quaver a4 quaver c6 quaver g4 semiquaver c6 semiquaver b5 semiquaver a5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver |
+semiquaverMeasure e5 b5 a5 s g5 s a5 e5 d5 c#5 d5 a5 g5 s f5 s g5 d5 cn5 bn4 |
+c#5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver f5 s semiquaver e5 s semiquaver d5 s semiquaver f5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver bn4 semiquaver a4 s crotchet |
+a4 semiquaver f4 semiquaver d4 semiquaver f4 semiquaver g4 semiquaver e4 semiquaver c#4 semiquaver e4 semiquaver f4 quaver d4 quaver d5 s crotchet |
+d5 semiquaver b4 semiquaver g4 semiquaver b4 semiquaver c5 semiquaver a4 semiquaver f#4 semiquaver a4 semiquaver b4 quaver g4 quaver b5 s crotchet |
+b5 semiquaver g4 semiquaver f4 semiquaver e4 semiquaver f4 quaver a5 s quaver a5 semiquaver f4 semiquaver e4 semiquaver d4 semiquaver e4 quaver g5 s quaver |
+g5 semiquaver e4 semiquaver d4 semiquaver c#4 semiquaver d4 quaver d5 s quaver d5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver e5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver |
+f5 semiquaver a4 semiquaver bn4 semiquaver c#5 semiquaver d5 semiquaver e5 semiquaver f5 semiquaver d5 semiquaver g4 semiquaver a5 semiquaver f5 s quaver f5 semiquaver d5 semiquaver b4 semiquaver g4 semiquaver |
+e5 semiquaver g4 semiquaver a4 semiquaver bn4 semiquaver c5 semiquaver d4 semiquaver e5 semiquaver c5 semiquaver f4 semiquaver c5 semiquaver e`5 s quaver e5 semiquaver c5 semiquaver a4 semiquaver f4 semiquaver |
+quaverMeasure d5 f5 g5 d5 e5 g5 a5 e5 |
+semiquaverMeasure f5 s g5 s f5 s e5 d5 c5 b4 a4 g4 a5 g5 f5 e5 d5 c5 b5 |
+a4 quaver f5 semiquaver g5 semiquaver a5 quaver f4 s quaver f4 semiquaver e4 semiquaver d4 semiquaver c4 semiquaver bn3 quaver bn4 s quaver |
+bn4 quaver e5 semiquaver f5 semiquaver g5 quaver e4 s quaver e4 semiquaver d4 semiquaver c#4 semiquaver bn3 semiquaver a3 quaver a4 s quaver |
+semiquaverMeasure a4 s d4 s f4 s a5 d6 a5 f5 d5 a4 s c5 s e5 s a5 c6 a5 e5 c5 |
+a4 s semiquaver bn4 s semiquaver d5 s semiquaver f5 semiquaver bn5 semiquaver f5 semiquaver d5 semiquaver a4 semiquaver g#4 s semiquaver b4 semiquaver d5 semiquaver e5 semiquaver b5 quaver rest quaver | 
 
-a3 quaver rest quaver rest crotchet rest minim |
-rest quaver a3 quaver g#3 quaver e3 quaver a2 quaver a3 semiquaver bn3 semiquaver c4 quaver c#4 quaver |
-d4 quaver rest quaver rest crotchet rest minim |
-quaverMeasure rest d4 c#4 a3 d4 d3 f3 d3 |
-a3 crotchet rest crotchet rest minim |
-g2 semiquaver a2 semiquaver b2 semiquaver c3 semiquaver d3 quaver g3 quaver f#3 quaver d3 quaver a2 quaver c3 quaver |
-bn2 quaver g2 quaver f3 s crotchet f3 quaver e3 semiquaver d3 semiquaver e3 quaver c3 quaver |
-quaverMeasure g2 c3 e`3 g2 f#2 d3 g2 e3 |
-quaverMeasure d3 c3 d3 d2 g2 b3 f#3 d3 | 
+rest measure |
+rest measure |
+rest measure |
+semiquaverMeasure rest rest rest rest rest rest rest rest rest rest rest rest rest d4 c4 bn3 |
+c4 quaver e5 quaver bn3 quaver d5 quaver a3 semiquaver d5 semiquaver c5 semiquaver bn4 semiquaver a4 semiquaver g4 semiquaver f4 semiquaver e4 semiquaver |
+f4 quaver a5 quaver e4 quaver g5 quaver d4 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver bn4 semiquaver a4 semiquaver |
+semiquaverMeasure bn4 f5 e5 s d5 s e5 b4 a4 g#4 a4 e5 d5 s c5 s d5 a4 g4 f#4 |
+g#4 semiquaver d5 semiquaver c5 semiquaver bn4 semiquaver c5 s semiquaver b4 s semiquaver a4 semiquaver c5 semiquaver b4 semiquaver a4 semiquaver g4 semiquaver f#4 semiquaver e4 quaver rest quaver |
+a4 semiquaver bn4 semiquaver c5 semiquaver d5 semiquaver e5 quaver a5 quaver g#5 quaver e5 quaver b4 quaver d5 quaver |
+c#5 quaver a4 quaver g5 s crotchet g5 quaver f#5 semiquaver e5 semiquaver f5 quaver d5 quaver |
+quaverMeasure bn4 d5 f5 a4 g#4 e5 a4 d5 |
+c5 crotchet bn4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver b4 s demisemiquaver c5 s demisemiquaver rest semiquaver f4 semiquaver e4 semiquaver d4 semiquaver | 
 
-g3 quaver rest quaver rest crotchet rest minim |
-rest quaver g3 quaver f#3 quaver d3 quaver g2 quaver g3 semiquaver a3 semiquaver b3 quaver bn3 quaver |
-c4 quaver rest quaver rest crotchet rest minim |
-rest c3 quaver bn2 quaver g2 quaver c2 quaver c3 s semiquaver d3 semiquaver e`3 quaver c3 quaver |
-f3 quaver rest crotchet a2 quaver b2 quaver rest crotchet b2 s semiquaver c3 semiquaver |
-quaverMeasure d3 rest rest d2 g2 rest rest e2 |
-a2 quaver rest crotchet a2 quaver d3 quaver rest crotchet d3 s semiquaver e`3 semiquaver |
-f3 quaver rest crotchet f2 quaver b2 quaver rest crotchet b3 s semiquaver a3 semiquaver |
-quaverMeasure g3 rest rest e3 f3 rest rest |
-quaverMeasure e3 rest rest a2 d3 a2 d2 f2 |
+quaverMeasure c4 s a4 s d4 s bn4 s c4 s a4 s bn3 s g#4 s |
+c4 s quaver a4 s quaver e4 s quaver bn4 s quaver c5 s quaver a4 s quaver rest semiquaver g5 semiquaver f5 semiquaver e5 semiquaver |
+semiquaverMeasure d5 s f5 s a5 d6 e5 s g5 s a5 c#6 d6 a5 f5 d5 c#5 s e5 s g5 a5 |
+semiquaverMeasure d5 s f5 s a5 d6 e5 s g5 s a5 c#6 d6 a5 f5 d5 d4 e4 f4 d4 |
+semiquaverMeasure e4 d4 e4 f4 e4 f#4 g4 e4 f4 e4 f4 g4 f4 g4 a4 f4 |
+g4 quaver d5 quaver rest quaver b5 quaver a5 semiquaver g5 semiquaver f#5 semiquaver e5 semiquaver f5 semiquaver d5 semiquaver e5 semiquaver f5 semiquaver |
+g5 s minim g5 semiquaver f5 semiquaver g5 semiquaver a5 semiquaver g5 semiquaver b5 semiquaver a5 semiquaver g5 semiquaver |
+a5 s minim a5 semiquaver g5 semiquaver f#5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver b4 semiquaver a4 semiquaver |
+b4 s quaver rest semiquaver c5 semiquaver a4 s quaver rest semiquaver g4 semiquaver g4 semiquaver g5 semiquaver f#5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver b4 semiquaver a4 semiquaver | 
 
-quaverMeasure g2 rest rest rest c3 g2 e2 c2 |
-quaverMeasure f2 rest rest rest b2 f3 d3 f2 |
-quaverMeasure e`3 g3 en3 c3 f3 a3 f#3 d3 |
-quaverMeasure g3 rest rest g2 a2 rest rest a3 |
-b3 quaver rest crotchet g3 quaver e3 quaver e2 semiquaver f2 semiquaver g2 quaver e2 quaver |
-a2 quaver rest crotchet f#3 quaver d3 quaver d2 semiquaver e2 semiquaver f#2 quaver d2 quaver |
-quaverMeasure g2 rest rest g3 f3 rest rest f2 |
-quaverMeasure b2 rest rest b3 a3 rest rest rest |
+semiquaverMeasure g4 s b4 s d5 g5 a4 s c5 s d4 f#5 g5 d5 b4 g4 f#4 s a4 s c5 d5 |
+semiquaverMeasure g4 s b4 s d5 g5 a4 s c5 s d4 f#5 g5 d5 b4 g4 g3 a`4 g4 fn4 |
+quaverMeasure e`4 s c5 s f4 s d5 s e4 s c5 s d4 s bn4 s |
+e`4 s quaver c5 s quaver g4 s quaver d5 s quaver e`5 quaver c5 quaver rest semiquaver g4 semiquaver f4 semiquaver g4 semiquaver |
+semiquaverMeasure a4 g4 a4 b4 a4 b4 c5 a4 b4 a4 b4 c5 d5 c5 d5 e5 |
+semiquaverMeasure f#5 e5 f5 g5 f5 g5 a5 f5 g5 c5 b4 a4 b4 d5 g5 s g5 s |
+g5 quaver a4 quaver g5 s crotchet g5 quaver a4 quaver d4 quaver f5 s quaver |
+f5 quaver f4 quaver e`5 s crotchet e5 quaver f4 quaver b3 quaver d5 quaver |
+semiquaverMeasure e4 s f4 s g4 b4 c#5 b5 a5 g5 f4 s g4 s a4 c5 d5 a5 g5 f5 |
+g4 s semiquaver a4 s semiquaver c#5 semiquaver d5 semiquaver e5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver a4 s semiquaver c5 s semiquaver d5 semiquaver e5 semiquaver f5 quaver d5 s quaver |
 
-quaverMeasure d3 s rest a3 s rest d2 s rest rest rest |
-quaverMeasure g2 s rest d3 s rest g3 s rest rest rest |
-quaverMeasure c4 s rest f3 s rest b3 s rest e3 s rest |
-quaverMeasure a3 s rest d3 s rest a3 e3 c#3 a2 |
-quaverMeasure d3 s rest a3 s rest d2 s rest rest rest |
-quaverMeasure g2 s rest d3 s rest g3 s rest rest rest |
-quaverMeasure c3 s rest f3 s rest b2 s rest e2 s rest |
-quaverMeasure a2 s rest d3 s rest a3 a2 c#3 a2 |
-semiquaverMeasure d3 c#3 d3 e3 f3 e3 f3 g3 a3 g3 a3 b3 a3 g3 f3 e3 |
-semiquaverMeasure d3 c3 d3 e`3 d3 c3 b2 a2 g2 f#2 g2 a2 g2 fn2 e2 d2 |
-c#2 crotchet rest quaver g3 s quaver g3 quaver f3 semiquaver e3 semiquaver f3 quaver b3 quaver |
-a3 quaver g3 quaver a3 quaver a2 quaver d2 s minim |
-d2 s semibreve |
+d4 s quaver g5 semiquaver a5 semiquaver b5 quaver g4 s quaver g4 semiquaver f4 semiquaver e4 semiquaver d4 semiquaver c4 quaver c5 s quaver |
+c5 quaver f5 semiquaver g5 semiquaver a5 quaver f4 s quaver f4 semiquaver e`4 semiquaver d4 semiquaver c4 semiquaver b3 quaver b4 quaver |
+semiquaverMeasure b4 c5 b4 a4 g4 f4 e4 d4 c4 d5 c5 b4 a4 g4 f#4 e4 |
+quaverMeasure d4 d5 e`5 b4 c5 e5 f5 c5 |
+semiquaverMeasure d5 f5 g5 a5 b5 c6 d6 b5 e5 b5 d6 s d6 s d6 b5 g5 e5 |
+semiquaverMeasure c#6 e5 f5 g5 a5 b5 c6 a5 d5 a5 c6 s c6 s c6 a5 f#5 d5 |
+b5 quaver g5 quaver d5 quaver d6 s quaver d6 quaver a5 semiquaver f5 semiquaver d5 s crotchet |
+d5 quaver b4 quaver g4 quaver g5 s quaver g5 quaver e5 semiquaver c#5 semiquaver a4 semiquaver g4 semiquaver f4 semiquaver e4 semiquaver |
+
+f4 quaver a5 quaver e4 quaver g5 quaver d4 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver b4 semiquaver a4 semiquaver |
+b4 quaver d6 quaver a4 quaver c6 quaver g4 semiquaver c6 semiquaver b5 semiquaver a5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver |
+semiquaverMeasure e5 b5 a5 s g5 s a5 e5 d5 c#5 d5 a5 g5 s f5 s g5 d5 c5 bn4 |
+c#5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver f5 s semiquaver e5 s semiquaver d5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver c5 semiquaver bn4 semiquaver a4 s crotchet |
+a4 semiquaver f4 semiquaver d4 semiquaver f4 semiquaver g4 semiquaver e4 semiquaver c#4 semiquaver e4 semiquaver f4 quaver d4 quaver d5 s crotchet |
+d5 semiquaver b4 semiquaver g4 semiquaver b4 semiquaver c5 semiquaver a4 semiquaver f#4 semiquaver a4 semiquaver b4 quaver g4 quaver b5 s crotchet |
+b5 semiquaver g4 semiquaver f4 semiquaver e4 semiquaver f4 quaver a5 s quaver a5 semiquaver f4 semiquaver e4 semiquaver d4 semiquaver e4 quaver g5 s quaver |
+g5 semiquaver e4 semiquaver d4 semiquaver c#4 semiquaver d4 quaver d5 s quaver d5 semiquaver f5 semiquaver e5 semiquaver d5 semiquaver e5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver |
+f5 semiquaver g5 semiquaver f5 semiquaver e5 semiquaver d5 quaver d6 quaver c#6 quaver a5 quaver e5 quaver g5 quaver |
+f#5 quaver d5 quaver c6 s crotchet c6 quaver bn5 semiquaver a5 semiquaver b5 quaver g5 quaver |
+quaverMeasure e5 g5 b5 d5 c#5 a5 d5 g5 |
+f5 s crotchet e5 s crotchet d5 s minim |
+d5 s semibreve |
 /* fin */
