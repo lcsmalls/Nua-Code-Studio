@@ -101,6 +101,8 @@
   let files = {}
   let tabs = [] // filenames
   let active = null
+  // track collapsed state for folders (keys include trailing slash)
+  let collapsedFolders = {}
   // per-file in-memory buffers track current edited content (unsaved)
   const buffers = {}
   // per-file Ace EditSession instances so each file has its own undo history
@@ -114,6 +116,7 @@
   const fileListEl = document.getElementById('file-list')
   const newBtn = document.getElementById('new-file')
   const saveBtn = document.getElementById('save-file')
+  const newFolderBtn = document.getElementById('new-folder')
   const tabsEl = document.getElementById('tabs')
   const runBtn = document.getElementById('run-preview')
   const togglePreviewBtn = document.getElementById('toggle-preview')
@@ -128,6 +131,7 @@
   let buildOutlineFn = null
   // global problems/errors list so various tools can push diagnostics
   let errors = []
+  let currentFolder = ''
 
   function ensureAceLoaded(cb){
     if(window.ace){ return cb() }
@@ -193,6 +197,27 @@
     }catch(e){}
     editor.setTheme('ace/theme/monokai')
     editor.setOptions({fontSize:14, showPrintMargin:false})
+    // attach context menu to editor
+    editor.on('contextmenu', (e) => {
+      e.preventDefault()
+      const menu = document.getElementById('context-menu')
+      const target = e.domEvent.target
+      let filename = null
+      const li = target.closest('#file-list li')
+      if(li && li.dataset && li.dataset.name) filename = li.dataset.name
+      const isProblems = !!target.closest('#console') || !!target.closest('#error-list')
+      Array.from(menu.querySelectorAll('.ctx-item')).forEach(it => {
+        const scope = it.getAttribute('data-scope') || 'both'
+        if(scope === 'both') it.style.display = ''
+        else if(scope === 'file') it.style.display = filename ? '' : 'none'
+        else if(scope === 'global') it.style.display = filename ? 'none' : ''
+        else if(scope === 'console') it.style.display = isProblems ? '' : 'none'
+      })
+      menu.style.display = 'block'
+      menu.style.left = e.clientX + 'px'
+      menu.style.top = e.clientY + 'px'
+      menu.dataset.target = filename || (isProblems ? 'console' : '')
+    })
     editor.session.setMode('ace/mode/html')
     // Bind editor keys to open the custom search panel and navigate matches
     try{
@@ -299,7 +324,7 @@
           outlineEl.appendChild(el)
         })
       }
-      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate(); debouncedLint() })
+      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate(); debouncedLint(); if(active) buffers[active] = editor.getValue() })
       // expose buildOutline for openFile to refresh outline immediately
       buildOutlineFn = buildOutline
       editor.selection.on('changeCursor', ()=> {})
@@ -604,8 +629,147 @@
     }catch(e){}
   }
   function saveToStorage(){
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(files))
+    try{
+      // sanitize files before storing: keep strings and folder markers
+      const safe = {}
+      Object.keys(files).forEach(k => {
+        const v = files[k]
+        if(typeof v === 'string' || v === '__folder__') safe[k] = v
+      })
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(safe))
+      files = Object.assign({}, safe)
+    }catch(e){ console.error('saveToStorage', e) }
     updatePlayMenuVisibility()
+  }
+
+  function buildTree(){
+    const tree = {}
+    for(const path in files){
+      if(files[path] === '__folder__'){
+        const parts = path.split('/').slice(0, -1)
+        let current = tree
+        for(const part of parts){
+          if(!current[part]) current[part] = {}
+          current = current[part]
+        }
+      }else{
+        const parts = path.split('/')
+        let current = tree
+        for(let i=0; i<parts.length; i++){
+          const part = parts[i]
+          if(i === parts.length - 1){
+            current[part] = files[path]
+          }else{
+            if(!current[part]) current[part] = {}
+            current = current[part]
+          }
+        }
+      }
+    }
+    return tree
+  }
+
+  function getAvailablePath(desired){
+    if(!files[desired]) return desired
+    // try adding suffix (1), (2), ... before extension
+    const parts = desired.split('/')
+    const base = parts.pop()
+    const prefix = parts.length? parts.join('/') + '/' : ''
+    const m = base.match(/^(.*?)(\.[^.]*)?$/)
+    const nameOnly = m ? m[1] : base
+    const ext = m && m[2] ? m[2] : ''
+    let i = 1
+    while(true){
+      const cand = prefix + nameOnly + ' (' + i + ')' + ext
+      if(!files[cand]) return cand
+      i++
+    }
+  }
+
+  function ensureParentFolders(path){
+    const parts = path.split('/')
+    if(parts.length <= 1) return
+    let cur = ''
+    for(let i=0;i<parts.length-1;i++){
+      cur += parts[i] + '/'
+      if(!files[cur]) files[cur] = '__folder__'
+    }
+  }
+
+  function moveFile(oldPath, newPath){
+    if(oldPath === newPath || !(oldPath in files)) return
+    // avoid accidental overwrites: pick an available path if needed
+    if(files[newPath] && files[newPath] !== '__folder__'){
+      newPath = getAvailablePath(newPath)
+    }
+    // ensure any parent folders for the destination path exist
+    ensureParentFolders(newPath)
+    files[newPath] = files[oldPath]
+    delete files[oldPath]
+    if(buffers[oldPath]){ buffers[newPath] = buffers[oldPath]; delete buffers[oldPath] }
+    if(sessions[oldPath]){ sessions[newPath] = sessions[oldPath]; delete sessions[oldPath] }
+    if(lastSaved[oldPath]){ lastSaved[newPath] = lastSaved[oldPath]; delete lastSaved[oldPath] }
+    if(gutterDecorations[oldPath]){ gutterDecorations[newPath] = gutterDecorations[oldPath]; delete gutterDecorations[oldPath] }
+    const ti = tabs.indexOf(oldPath)
+    if(ti >= 0) tabs[ti] = newPath
+    if(active === oldPath) active = newPath
+    saveToStorage()
+    renderFileList()
+    renderTabs()
+  }
+
+  function getAvailableFolderPath(desired){
+    if(!files[desired]) return desired
+    const base = desired.replace(/\/$/, '')
+    let i = 1
+    while(true){
+      const cand = base + ' (' + i + ')/'
+      if(!files[cand]) return cand
+      i++
+    }
+  }
+
+  function moveFolder(oldPath, destFolder){
+    // oldPath expected to end with '/'
+    if(!oldPath || !oldPath.endsWith('/')) return
+    if(!(oldPath in files)) return
+    // build destination base (destFolder should end with '/').
+    // If destFolder is empty (root), keep it empty to avoid leading '/'.
+    if(destFolder && !destFolder.endsWith('/')) destFolder = destFolder + '/'
+    const folderName = oldPath.replace(/\/$/, '').split('/').pop()
+    let newBase = destFolder + folderName + '/'
+    if(files[newBase]) newBase = getAvailableFolderPath(newBase)
+    ensureParentFolders(newBase)
+    const keys = Object.keys(files)
+    // move all keys under oldPath (including the folder marker)
+    keys.forEach(k => {
+      if(k === oldPath || k.indexOf(oldPath) === 0){
+        const rel = k.substring(oldPath.length)
+        const destKey = newBase + rel
+        files[destKey] = files[k]
+        if(buffers[k]){ buffers[destKey] = buffers[k]; delete buffers[k] }
+        if(sessions[k]){ sessions[destKey] = sessions[k]; delete sessions[k] }
+        if(lastSaved[k]){ lastSaved[destKey] = lastSaved[k]; delete lastSaved[k] }
+        if(gutterDecorations[k]){ gutterDecorations[destKey] = gutterDecorations[k]; delete gutterDecorations[k] }
+        const ti = tabs.indexOf(k); if(ti>=0) tabs[ti] = destKey
+        if(active === k) active = destKey
+        delete files[k]
+      }
+    })
+    saveToStorage(); renderFileList(); renderTabs()
+  }
+
+  function updateBreadcrumb(){
+    const bc = document.getElementById('editor-breadcrumb')
+    if(bc){
+      bc.innerHTML = '<span class="crumb">' + escapeHtml(currentFolder) + '</span>'
+    }
+  }
+
+  function showPlaceholder(){
+    const ph = document.getElementById('editor-placeholder')
+    if(ph) ph.style.display = 'flex'
+    if(editor) editor.setValue('')
   }
 
   // Settings persistence: remembers UI options like word wrap, autoRefresh, ui-scale and bottom height
@@ -616,6 +780,11 @@
   }
   function saveSettings(){
     try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateStatus('Settings saved') }catch(e){ console.error('saveSettings', e) }
+  }
+
+  // persist collapsed folder state alongside other settings
+  function persistCollapsedState(){
+    try{ settings.collapsedFolders = Object.assign({}, collapsedFolders); saveSettings() }catch(e){}
   }
   function applySettings(){
     try{
@@ -631,60 +800,235 @@
 
   // UI helpers
   function renderFileList(){
+    const tree = buildTree()
     fileListEl.innerHTML = ''
-    Object.keys(files).forEach(name=>{
-      const li = document.createElement('li')
-      li.dataset.name = name
-      li.tabIndex = 0
+    function renderDir(dir, prefix, ul){
+      for(const [name, value] of Object.entries(dir)){
+        const fullPath = prefix + name
+        const li = document.createElement('li')
+        // Normalize dataset name: include trailing slash for folders so
+        // callers can reliably detect folder keys (files store raw paths)
+        li.dataset.name = (typeof value === 'object') ? (fullPath + '/') : fullPath
+        if(typeof value !== 'string') li.classList.add('folder')
+        li.tabIndex = 0
+        li.draggable = true
+        li.addEventListener('dragstart', (e) => { 
+          const dragKey = (typeof value === 'object') ? (fullPath + '/') : fullPath
+          e.dataTransfer.setData('text/plain', dragKey)
+        })
 
-      // left-side (icon + label)
-      const left = document.createElement('div')
-      left.style.display = 'flex'
-      left.style.alignItems = 'center'
-      left.style.flex = '1'
+        // left-side (icon + label)
+        const left = document.createElement('div')
+        left.style.display = 'flex'
+        left.style.alignItems = 'center'
+        left.style.flex = '1'
 
-      const ico = document.createElement('span')
-      ico.className = 'file-icon'
-      ico.style.marginRight = '8px'
-      ico.style.opacity = '0.95'
-      ico.style.width = '20px'
-      ico.style.display = 'inline-block'
-      ico.style.textAlign = 'center'
-      try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
+        const ico = document.createElement('span')
+        ico.className = 'file-icon'
+        ico.style.marginRight = '8px'
+        ico.style.opacity = '0.95'
+        ico.style.width = '20px'
+        ico.style.display = 'inline-block'
+        ico.style.textAlign = 'center'
+        if(typeof value === 'string'){
+          try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
+        }else{
+          ico.innerHTML = '<span class="msr">folder</span>'
+        }
 
-      const nameSpan = document.createElement('span')
-      nameSpan.className = 'file-name'
-      nameSpan.textContent = name
-      nameSpan.style.flex = '1'
-      nameSpan.style.cursor = 'pointer'
-      nameSpan.addEventListener('click', ()=> openFile(name))
-      nameSpan.addEventListener('dblclick', (e)=>{ e.stopPropagation(); startRename(name) })
+        const nameSpan = document.createElement('span')
+        nameSpan.className = 'file-name'
+        nameSpan.textContent = name
+        nameSpan.style.flex = '1'
+        nameSpan.style.cursor = 'pointer'
+        if(typeof value === 'string'){
+          nameSpan.addEventListener('click', ()=> openFile(fullPath))
+          nameSpan.addEventListener('dblclick', (e)=>{ e.stopPropagation(); startRename(fullPath) })
+        }else{
+          // set currentFolder to include trailing slash to simplify concatenation
+          nameSpan.addEventListener('click', () => { currentFolder = fullPath + '/'; active = null; updateBreadcrumb(); showPlaceholder() })
+        }
 
-      left.appendChild(ico)
-      left.appendChild(nameSpan)
-      li.appendChild(left)
+        left.appendChild(ico)
+        left.appendChild(nameSpan)
+        li.appendChild(left)
 
-      // delete button
-      const del = document.createElement('button')
-      del.className = 'btn-close small'
-      del.title = 'Delete file'
-      del.innerHTML = '<span class="msr">delete</span>'
-      del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(name) })
-      li.appendChild(del)
+        if(typeof value === 'string'){
+          // delete button for files — wrap into a header so the delete
+          // button always aligns to the right regardless of filename width
+          const del = document.createElement('button')
+          del.className = 'btn-close small'
+          del.title = 'Delete file'
+          del.innerHTML = '<span class="msr">delete</span>'
+          del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(fullPath) })
 
-      // show dirty indicator if buffer differs from saved version (works for non-active files)
-      const buf = (buffers.hasOwnProperty(name)) ? buffers[name] : ( (name === active && editor) ? editor.getValue() : files[name] || '' )
-      const dirty = buf !== (files[name]||'')
-      if(dirty){
-        const d = document.createElement('span')
-        d.className = 'dirty-indicator'
-        d.title = 'Unsaved changes'
-        nameSpan.appendChild(d)
+          // show dirty indicator
+          const buf = (buffers.hasOwnProperty(fullPath)) ? buffers[fullPath] : ( (fullPath === active && editor) ? editor.getValue() : files[fullPath] || '' )
+          const dirty = buf !== (files[fullPath]||'')
+          if(dirty){
+            const d = document.createElement('span')
+            d.className = 'dirty-indicator'
+            d.title = 'Unsaved changes'
+            nameSpan.appendChild(d)
+          }
+
+          // create a row container so the left content and delete button are
+          // spaced apart and the delete button is always at the same x-position
+          try{
+            if(left && left.parentNode === li) li.removeChild(left)
+            const row = document.createElement('div')
+            row.className = 'file-row'
+            row.style.display = 'flex'
+            row.style.justifyContent = 'space-between'
+            row.style.alignItems = 'center'
+            row.appendChild(left)
+            row.appendChild(del)
+            li.appendChild(row)
+          }catch(e){
+            // fallback
+            li.appendChild(del)
+          }
+        }else{
+          // folder, add a toggle and sub ul
+          const toggle = document.createElement('span')
+          toggle.className = 'folder-toggle msr'
+          toggle.textContent = collapsedFolders[fullPath + '/'] ? 'chevron_right' : 'expand_more'
+          toggle.style.cursor = 'pointer'
+          toggle.style.marginRight = '6px'
+          left.insertBefore(toggle, nameSpan)
+
+          const subUl = document.createElement('ul')
+          subUl.className = 'folder-children' + (collapsedFolders[fullPath + '/'] ? ' collapsed' : '')
+          li.appendChild(subUl)
+          // render children with a trailing prefix so all child paths are correct
+          renderDir(value, fullPath + '/', subUl)
+
+          // Drop handlers: use the folder path (with trailing slash) to build
+          // the destination path consistently.
+          const folderDest = fullPath + '/'
+          subUl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const dragged = e.dataTransfer.getData('text/plain');
+            if(!dragged || !(dragged in files)) return;
+            if(files[dragged] === '__folder__'){
+              moveFolder(dragged, folderDest)
+            }else{
+              const fileName = dragged.split('/').pop();
+              moveFile(dragged, folderDest + fileName)
+            }
+          })
+          subUl.addEventListener('dragover', (e) => e.preventDefault())
+
+          // delete button for folders (will be moved into header)
+          const del = document.createElement('button')
+          del.className = 'btn-close small'
+          del.title = 'Delete folder'
+          del.innerHTML = '<span class="msr">delete</span>'
+          del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(folderDest) })
+
+          // Replace the flat `li` layout with a header container so the
+          // children `ul` appears underneath the folder header instead of
+          // beside it (fixes files appearing to the right of folders).
+          try{
+            // remove the previously appended `left` and insert into header
+            if(left && left.parentNode === li) li.removeChild(left)
+            const header = document.createElement('div')
+            header.className = 'folder-header'
+            header.style.display = 'flex'
+            header.style.justifyContent = 'space-between'
+            header.style.alignItems = 'center'
+            header.appendChild(left)
+            header.appendChild(del)
+            // insert header before the children list so children render below
+            li.insertBefore(header, subUl)
+          }catch(e){}
+
+          li.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const dragged = e.dataTransfer.getData('text/plain');
+            if(!dragged || dragged === fullPath || !(dragged in files)) return;
+            if(files[dragged] === '__folder__'){
+              moveFolder(dragged, folderDest)
+            }else{
+              const fileName = dragged.split('/').pop();
+              moveFile(dragged, folderDest + fileName)
+            }
+          })
+          li.addEventListener('dragover', (e) => e.preventDefault())
+
+          // toggle click: expand/collapse using CSS class for smooth transition
+          toggle.addEventListener('click', (e)=>{
+            e.stopPropagation(); const key = fullPath + '/'; collapsedFolders[key] = !collapsedFolders[key];
+            if(collapsedFolders[key]) subUl.classList.add('collapsed')
+            else subUl.classList.remove('collapsed')
+            toggle.textContent = collapsedFolders[key] ? 'chevron_right' : 'expand_more'
+            try{ persistCollapsedState() }catch(e){}
+          })
+        }
+
+        if(fullPath === active) li.classList.add('active')
+        ul.appendChild(li)
       }
+    }
+    // Render a virtual top-level "Project" folder to give the illusion
+    // that the whole workspace is inside a single project container.
+    // Users can drop files onto this project header to move them to root.
+    const projectLi = document.createElement('li')
+    projectLi.className = 'folder project-root'
 
-      if(name === active) li.classList.add('active')
-      fileListEl.appendChild(li)
-    })
+    const projLeft = document.createElement('div')
+    projLeft.style.display = 'flex'
+    projLeft.style.alignItems = 'center'
+    projLeft.style.flex = '1'
+
+    const projIco = document.createElement('span')
+    projIco.className = 'file-icon'
+    projIco.style.marginRight = '8px'
+    projIco.innerHTML = '<span class="msr">folder_open</span>'
+
+    const projToggle = document.createElement('span')
+    projToggle.className = 'folder-toggle msr'
+    projToggle.textContent = collapsedFolders['project/'] ? 'chevron_right' : 'expand_more'
+    projToggle.style.cursor = 'pointer'
+    projToggle.style.marginRight = '6px'
+
+    const projLabel = document.createElement('span')
+    projLabel.className = 'file-name'
+    projLabel.textContent = 'Project'
+    projLabel.style.flex = '1'
+    projLabel.style.cursor = 'pointer'
+    projLabel.addEventListener('click', ()=>{ currentFolder = ''; active = null; updateBreadcrumb(); showPlaceholder() })
+
+    projLeft.appendChild(projIco)
+    projLeft.appendChild(projToggle)
+    projLeft.appendChild(projLabel)
+
+    const projHeader = document.createElement('div')
+    projHeader.className = 'folder-header project-header'
+    projHeader.style.display = 'flex'
+    projHeader.style.justifyContent = 'space-between'
+    projHeader.style.alignItems = 'center'
+    projHeader.appendChild(projLeft)
+
+    const projChildren = document.createElement('ul')
+    projChildren.className = 'folder-children' + (collapsedFolders['project/'] ? ' collapsed' : '')
+    projChildren.style.listStyle = 'none'
+    // render the real file tree inside project children
+    renderDir(tree, '', projChildren)
+
+    // drop to move to project root
+    projChildren.addEventListener('drop', (e)=>{ e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if(dragged && typeof files[dragged] === 'string'){ const fileName = dragged.split('/').pop(); moveFile(dragged, getAvailablePath(fileName)) } })
+    projChildren.addEventListener('dragover', (e)=> e.preventDefault())
+
+    // toggle handler
+    projToggle.addEventListener('click', (e)=>{ e.stopPropagation(); const key = 'project/'; collapsedFolders[key] = !collapsedFolders[key]; if(collapsedFolders[key]) projChildren.classList.add('collapsed'); else projChildren.classList.remove('collapsed'); projToggle.textContent = collapsedFolders[key] ? 'chevron_right' : 'expand_more'; try{ persistCollapsedState() }catch(e){} })
+
+    projectLi.appendChild(projHeader)
+    projectLi.appendChild(projChildren)
+    // Accept drops on the header itself so users can drop onto the Project label
+    projHeader.addEventListener('drop', (e)=>{ e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if(dragged && typeof files[dragged] === 'string'){ const fileName = dragged.split('/').pop(); moveFile(dragged, getAvailablePath(fileName)) } })
+    projHeader.addEventListener('dragover', (e)=> e.preventDefault())
+    fileListEl.appendChild(projectLi)
   }
 
   // Inline create: insert an input at top of file list for naming the new file
@@ -727,7 +1071,7 @@
     function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
 
     function commit(){
-      let name = (input.value || '').trim()
+      let name = currentFolder ? currentFolder + (input.value || '').trim() : (input.value || '').trim()
       if(!name){ cleanup(); return }
       // auto-append default extension if user omitted one
       if(!/\.[a-z0-9]+$/i.test(name)) name += '.html'
@@ -750,6 +1094,64 @@
     input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') commit(); else if(e.key==='Escape'){ cleanup() } })
     // On blur we cancel the inline create to avoid focus/blur loops with modals.
     input.addEventListener('blur', ()=> { setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
+  }
+
+  function startCreateFolder(){
+    const list = document.getElementById('file-list')
+    if(!list) return
+    const li = document.createElement('li')
+    li.className = 'creating'
+    const ico = document.createElement('span')
+    ico.className = 'file-icon'
+    ico.style.marginRight = '8px'
+    ico.style.width = '20px'
+    ico.style.display = 'inline-block'
+    ico.style.textAlign = 'center'
+    ico.innerHTML = `<span class="msr">create_new_folder</span>`
+    li.appendChild(ico)
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.placeholder = 'foldername'
+    input.style.flex = '1'
+    input.style.padding = '6px 8px'
+    input.style.borderRadius = '6px'
+    input.style.border = '1px solid rgba(255,255,255,0.04)'
+    input.style.background = 'rgba(255,255,255,0.02)'
+    input.style.color = 'var(--muted)'
+    li.appendChild(input)
+    const err = document.createElement('div')
+    err.style.color = '#ff6b6b'
+    err.style.fontSize = '12px'
+    err.style.marginTop = '6px'
+    err.style.display = 'none'
+    li.appendChild(err)
+    list.insertBefore(li, list.firstChild)
+    input.focus(); input.select()
+
+    function cleanup(){ li.parentNode.removeChild(li) }
+    function showInlineError(msg){ err.textContent = msg; err.style.display = 'block' }
+
+    function commit(){
+      const name = currentFolder ? currentFolder + input.value.trim() : input.value.trim()
+      if(!name){ cleanup(); return }
+      // validate the raw input (disallow slashes in the typed folder name)
+      const raw = input.value.trim()
+      if(raw.includes('/') || raw.includes('\\')){ showInlineError('Folder name cannot contain slashes'); return }
+      const key = name + '/'
+      if(files[key]){ showInlineError('Folder already exists'); return }
+      // ensure parent folders exist
+      ensureParentFolders(key)
+      files[key] = '__folder__'
+      saveToStorage()
+      renderFileList()
+      cleanup()
+    }
+
+    input.addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter') commit()
+      else if(e.key === 'Escape') cleanup()
+    })
+    input.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
   }
 
   // Start inline rename of a file (blur-safe, inline errors)
@@ -806,6 +1208,11 @@
       }
       files[safe] = files[currentName]
       delete files[currentName]
+      // update buffers etc
+      if(buffers[currentName]){ buffers[safe] = buffers[currentName]; delete buffers[currentName] }
+      if(sessions[currentName]){ sessions[safe] = sessions[currentName]; delete sessions[currentName] }
+      if(lastSaved[currentName]){ lastSaved[safe] = lastSaved[currentName]; delete lastSaved[currentName] }
+      if(gutterDecorations[currentName]){ gutterDecorations[safe] = gutterDecorations[currentName]; delete gutterDecorations[currentName] }
       const ti = tabs.indexOf(currentName)
       if(ti>=0) tabs[ti] = safe
       if(active === currentName) active = safe
@@ -1457,22 +1864,41 @@
   function deleteFile(name){
     if(!(name in files)) return
     // deletion confirmation is handled before calling this, but guard just in case
-    // remove from files and tabs
-    delete files[name]
-    const ti = tabs.indexOf(name)
-    if(ti >= 0) tabs.splice(ti,1)
-    // clear any in-memory buffers/sessions/metadata for the deleted file
-    try{ delete buffers[name] }catch(e){}
-    try{
-      if(sessions[name]){
-        try{ if(typeof sessions[name].destroy === 'function') sessions[name].destroy() }catch(e){}
-        delete sessions[name]
-      }
-    }catch(e){}
-    try{ delete lastSaved[name] }catch(e){}
-    try{ delete gutterDecorations[name] }catch(e){}
-    if(active === name){
-      active = tabs.length? tabs[Math.max(0,ti-1)]: null
+    // if folder, delete all files in it
+    if(name.endsWith('/')){
+      const prefix = name
+      Object.keys(files).filter(k => k.startsWith(prefix)).forEach(k => {
+        delete files[k]
+        const ti = tabs.indexOf(k)
+        if(ti >= 0) tabs.splice(ti,1)
+        try{ delete buffers[k] }catch(e){}
+        try{
+          if(sessions[k]){
+            try{ if(typeof sessions[k].destroy === 'function') sessions[k].destroy() }catch(e){}
+            delete sessions[k]
+          }
+        }catch(e){}
+        try{ delete lastSaved[k] }catch(e){}
+        try{ delete gutterDecorations[k] }catch(e){}
+      })
+    }else{
+      // remove from files and tabs
+      delete files[name]
+      const ti = tabs.indexOf(name)
+      if(ti >= 0) tabs.splice(ti,1)
+      // clear any in-memory buffers/sessions/metadata for the deleted file
+      try{ delete buffers[name] }catch(e){}
+      try{
+        if(sessions[name]){
+          try{ if(typeof sessions[name].destroy === 'function') sessions[name].destroy() }catch(e){}
+          delete sessions[name]
+        }
+      }catch(e){}
+      try{ delete lastSaved[name] }catch(e){}
+      try{ delete gutterDecorations[name] }catch(e){}
+    }
+    if(active === name || (name.endsWith('/') && active && active.startsWith(name))){
+      active = tabs.length? tabs[0]: null
       if(active && editor) openFile(active)
       else {
         // no active file -> clear editor and show placeholder
@@ -1581,12 +2007,23 @@
     const session = getSessionFor(name)
     editor.setSession(session)
     editor.focus()
+    // refresh file list/tabs now that the editor session is attached so
+    // dirty indicators (which may rely on editor.getValue()) are accurate
+    try{ renderTabs(); renderFileList() }catch(e){}
     const filenameEl = document.getElementById('editor-filename')
     if(filenameEl) filenameEl.textContent = name
     // breadcrumb
-    try{ const bc = document.getElementById('editor-breadcrumb'); if(bc) bc.innerHTML = '<span class="crumb">/</span> <span id="editor-file-name-text" style="font-weight:600;color:var(--accent-2)">' + escapeHtml(name) + '</span>' }catch(e){}
+    try{ 
+      const bc = document.getElementById('editor-breadcrumb'); 
+      if(bc) {
+        const parts = name.split('/')
+        const crumb = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '/'
+        const filename = parts[parts.length - 1]
+        bc.innerHTML = '<span class="crumb">' + escapeHtml(crumb) + '</span> <span id="editor-filename">' + escapeHtml(filename) + '</span>'
+      }
+    }catch(e){}
     // update document title to reflect active file
-    try{ document.title = 'NuaCode - ' + name }catch(e){}
+    try{ document.title = 'Nua Code Studio - ' + name }catch(e){}
     updateStatus('Opened ' + name)
     // ensure bottom panel remains visible when switching files
     try{ const bp = document.getElementById('bottom-panel'); if(bp) bp.style.display = 'block' }catch(e){}
@@ -1608,14 +2045,28 @@
     const i = tabs.indexOf(name)
     if(i>=0) tabs.splice(i,1)
     if(name===active){
-      active = tabs.length? tabs[Math.max(0,i-1)]: null
-      if(active) openFile(active)
+      // Persist the current editor content for the file being closed so we
+      // don't accidentally overwrite another file's buffer when switching.
+      try{ if(editor) buffers[name] = editor.getValue() }catch(e){}
+      const next = tabs.length? tabs[Math.max(0,i-1)]: null
+      if(next) {
+        // Let openFile handle persisting previous active (it will see the
+        // correct `active` value) by calling it while `active` still points
+        // to the file being closed.
+        openFile(next)
+      } else {
+        // No next tab: clear active and the editor
+        active = null
+      }
     }
     renderTabs(); renderFileList();
     // persist last-opened tabs
     try{ settings.lastTabs = tabs.slice(); settings.lastActive = active; saveSettings() }catch(e){}
     // if no active file show placeholder
-    if(!active){ try{ const ph = document.getElementById('editor-placeholder'); if(ph) ph.style.display = 'flex' }catch(e){} }
+    if(!active){ 
+      try{ if(editor) editor.setValue('', -1) }catch(e){}
+      try{ const ph = document.getElementById('editor-placeholder'); if(ph) ph.style.display = 'flex' }catch(e){}
+    }
   }
 
   function createNewFile(){
@@ -2448,18 +2899,35 @@
     const menus = Array.from(document.querySelectorAll('.menu'))
     menus.forEach(m=>{
       m.addEventListener('click', (e)=>{
+        try{ e.stopPropagation() }catch(_){}
         // toggle open state on this menu
         const isOpen = m.classList.contains('open')
-        // close others
-        menus.forEach(x=> x.classList.remove('open'))
-        if(!isOpen) m.classList.add('open')
+        // close others and hide their dropdowns
+        menus.forEach(x=> { x.classList.remove('open'); const dd = x.querySelector('.dropdown'); if(dd) dd.style.display = '' })
+        if(!isOpen){
+          m.classList.add('open')
+          // position the dropdown using fixed positioning (robust to layout/transform)
+          const dropdown = m.querySelector('.dropdown')
+          if(dropdown){
+            try{
+              const rect = m.getBoundingClientRect()
+              dropdown.style.position = 'fixed'
+              dropdown.style.left = Math.max(8, rect.left) + 'px'
+              dropdown.style.top = (rect.top + rect.height) + 'px'
+              dropdown.style.zIndex = 20000
+              dropdown.style.display = 'block'
+            }catch(e){ /* ignore positioning failures */ }
+          }
+        }
       })
     })
 
-    // close dropdowns on outside click
+    // close dropdowns on outside click (ignore clicks inside dropdowns)
     document.addEventListener('click', (e)=>{
-      if(!e.target.closest('.menu')){
+      if(!e.target.closest('.menu') && !e.target.closest('.dropdown')){
         menus.forEach(x=> x.classList.remove('open'))
+        // also hide any dropdowns that were explicitly positioned
+        Array.from(document.querySelectorAll('.menu .dropdown')).forEach(d=> { d.style.display = '' })
       }
     })
 
@@ -2488,8 +2956,9 @@
       })
       // prevent default context menu and show our menu on right click
         document.addEventListener('contextmenu', (e)=>{
-          e.preventDefault()
           const target = e.target
+          // Always prevent browser menu so we show our custom menu
+          try{ e.preventDefault(); e.stopPropagation() }catch(_){}
           // store last context target name if over a file list item
           let filename = null
           const li = target.closest('#file-list li')
@@ -2497,13 +2966,13 @@
 
           // Prepare menu visibility for scope-based items
           const isFile = !!filename
-          const isProblems = !!target.closest('#problems') || !!target.closest('#error-list')
+          const isProblems = !!target.closest('#console') || !!target.closest('#error-list')
           Array.from(ctx.querySelectorAll('.ctx-item')).forEach(it=>{
             const scope = it.getAttribute('data-scope') || 'both'
             if(scope === 'both') it.style.display = ''
             else if(scope === 'file') it.style.display = isFile? '': 'none'
             else if(scope === 'global') it.style.display = isFile? 'none': ''
-            else if(scope === 'problems') it.style.display = isProblems ? '' : 'none'
+            else if(scope === 'console') it.style.display = isProblems ? '' : 'none'
           })
 
           // Temporarily show offscreen to measure size, then position so it doesn't overflow
@@ -2523,7 +2992,7 @@
 
           ctx.style.left = left + 'px'
           ctx.style.top = top + 'px'
-          ctx.dataset.target = filename || (isProblems ? 'problems' : '')
+          ctx.dataset.target = filename || (isProblems ? 'console' : '')
         })
       // hide context menu on any left-click outside
       document.addEventListener('mousedown', (e)=>{
@@ -2661,16 +3130,19 @@
         try{ const li = Array.from(document.querySelectorAll('#file-list li')).find(l=> l.dataset && l.dataset.name === target); if(li) li.scrollIntoView({block:'center'}); }catch(e){}
         break }
       case 'copyErrors':{
-        // copy the current Problems list to clipboard
+        // copy the current Console (Problems + Debug) to clipboard
         const listText = (errors && errors.length>0) ? errors.map(e=>{
           const src = (e.source || '') + (e.line ? (':' + e.line) : '')
           if(e.kind === 'lint') return `${src} - ${e.message}`
           return `[${e.kind}] ${src} - ${e.message}`
         }).join('\n\n') : 'No problems'
 
+        const debugText = document.getElementById('debug-output').textContent
+        const fullText = listText + '\n\n--- Debug ---\n' + debugText
+
         if(navigator.clipboard && navigator.clipboard.writeText){
-          navigator.clipboard.writeText(listText).then(()=> updateStatus('Errors copied')) .catch(()=> { fallbackCopy(listText) })
-        }else{ fallbackCopy(listText) }
+          navigator.clipboard.writeText(fullText).then(()=> updateStatus('Console copied')) .catch(()=> { fallbackCopy(fullText) })
+        }else{ fallbackCopy(fullText) }
         break }
       case 'downloadAll':{
         // simple project export as JSON containing all files
@@ -2698,7 +3170,7 @@
         const target = ctx && ctx.dataset && ctx.dataset.target ? ctx.dataset.target : null
         if(target && target in files) openFile(target)
         break }
-      case 'toggleProblems':{
+      case 'toggleConsole':{
         const bp = document.getElementById('bottom-panel')
         if(bp) bp.style.display = (bp.style.display === 'block')? 'none':'block'
         break }
@@ -3155,6 +3627,8 @@
     loadFromStorage()
     // load UI settings (including autosave) and apply them
     try{ loadSettings(); applySettings() }catch(e){}
+    // restore collapsed folder state if present in settings
+    try{ if(settings && settings.collapsedFolders) collapsedFolders = Object.assign({}, settings.collapsedFolders) }catch(e){}
     renderFileList()
     // restore previously opened tabs if present; otherwise start with no file open
     try{
@@ -3194,12 +3668,27 @@
     // events
     newBtn.onclick = createNewFile
     saveBtn.onclick = saveCurrent
-    runBtn.onclick = runPreview
-    if(stopBtn) stopBtn.onclick = stopPreview
-    togglePreviewBtn.onclick = ()=>{
-      const pc = document.getElementById('preview-container')
-      pc.style.display = pc.style.display === 'none' ? 'block' : 'none'
-    }
+    newFolderBtn.onclick = startCreateFolder
+
+    // allow dropping files to the root of the file list to move them out of folders
+    try{
+      const root = document.getElementById('file-list')
+      if(root){
+        root.addEventListener('drop', (e)=>{
+          e.preventDefault()
+          const dragged = e.dataTransfer.getData('text/plain')
+          if(!dragged || !(dragged in files)) return
+          if(files[dragged] === '__folder__'){
+            moveFolder(dragged, '')
+          }else{
+            const fileName = dragged.split('/').pop()
+            // move to root; avoid overwrite
+            moveFile(dragged, getAvailablePath(fileName))
+          }
+        })
+        root.addEventListener('dragover', (e)=> e.preventDefault())
+      }
+    }catch(e){}
 
     // placeholder click -> create new file
     try{
@@ -3256,9 +3745,7 @@
     const bottomPanel = document.getElementById('bottom-panel')
     // restore saved bottom panel height if available
     try{ const h = localStorage.getItem('mini_vsc_bottom_height'); if(h && bottomPanel) bottomPanel.style.height = h }catch(e){}
-    const errorList = document.getElementById('error-list')
-    const clearBtn = document.getElementById('clear-errors')
-    const toggleErrors = document.getElementById('toggle-errors')
+    const toggleConsole = document.getElementById('toggle-console')
     const bottomTabs = Array.from(document.querySelectorAll('.bottom-tab'))
     const terminalOutput = document.getElementById('terminal-output')
     const terminalLine = document.getElementById('terminal-line')
@@ -3267,10 +3754,16 @@
     // called from runLint() and other places. The top-level implementation
     // queries DOM elements on each call.
 
-    clearBtn.onclick = ()=>{ errors = []; renderErrors() }
-    toggleErrors.onclick = ()=>{
-      if(bottomPanel.style.display === 'block'){ bottomPanel.style.display = 'none' }
-      else { bottomPanel.style.display = 'block' }
+    // wire Clear Errors button (if present)
+    try{
+      const clearBtnEl = document.getElementById('clear-errors')
+      if(clearBtnEl) clearBtnEl.onclick = ()=>{ errors = []; renderErrors(); const out = document.getElementById('debug-output'); if(out) out.textContent = '' }
+    }catch(e){}
+    if(toggleConsole){
+      toggleConsole.onclick = ()=>{
+        if(bottomPanel.style.display === 'block'){ bottomPanel.style.display = 'none' }
+        else { bottomPanel.style.display = 'block' }
+      }
     }
 
     // bottom tab switching
@@ -3555,6 +4048,16 @@
   }
   ensureAceLoaded(()=>{
     setupEditor()
+    // override console.log to capture to debug panel
+    const originalLog = console.log
+    console.log = function(...args){
+      originalLog.apply(console, args)
+      const debugOutput = document.getElementById('debug-output')
+      if(debugOutput){
+        debugOutput.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ') + '\n'
+        debugOutput.scrollTop = debugOutput.scrollHeight
+      }
+    }
     // apply persisted UI settings once editor exists
     try{ applySettings() }catch(e){}
     init()
