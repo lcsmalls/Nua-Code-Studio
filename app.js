@@ -29,8 +29,6 @@
       style = 'line'; linePrefix = '//'
     }else if(ext === 'py'){
       style = 'line'; linePrefix = '#'
-    }else if(ext === 'euph'){
-      style = 'block'; blockStart = '/*'; blockEnd = '*/'
     }else{
       // default to line comments when feasible
       style = 'line'; linePrefix = '//'
@@ -101,8 +99,6 @@
   let files = {}
   let tabs = [] // filenames
   let active = null
-  // track collapsed state for folders (keys include trailing slash)
-  let collapsedFolders = {}
   // per-file in-memory buffers track current edited content (unsaved)
   const buffers = {}
   // per-file Ace EditSession instances so each file has its own undo history
@@ -116,7 +112,6 @@
   const fileListEl = document.getElementById('file-list')
   const newBtn = document.getElementById('new-file')
   const saveBtn = document.getElementById('save-file')
-  const newFolderBtn = document.getElementById('new-folder')
   const tabsEl = document.getElementById('tabs')
   const runBtn = document.getElementById('run-preview')
   const togglePreviewBtn = document.getElementById('toggle-preview')
@@ -127,11 +122,9 @@
 
   // Ace Editor placeholder — will be initialized after Ace loads
   let editor = null
-  let euphModeInstance = null
   let buildOutlineFn = null
   // global problems/errors list so various tools can push diagnostics
   let errors = []
-  let currentFolder = ''
 
   function ensureAceLoaded(cb){
     if(window.ace){ return cb() }
@@ -172,7 +165,6 @@
 
 
   function setupEditor(){
-    try{ if(typeof registerEuphMode === 'function') registerEuphMode() }catch(e){}
     editor = ace.edit('editor')
     // Remove Ace's built-in settings shortcut (Ctrl+, / Command+,) which
     // opens an editor settings panel that we don't want in this UI.
@@ -197,27 +189,6 @@
     }catch(e){}
     editor.setTheme('ace/theme/monokai')
     editor.setOptions({fontSize:14, showPrintMargin:false})
-    // attach context menu to editor
-    editor.on('contextmenu', (e) => {
-      e.preventDefault()
-      const menu = document.getElementById('context-menu')
-      const target = e.domEvent.target
-      let filename = null
-      const li = target.closest('#file-list li')
-      if(li && li.dataset && li.dataset.name) filename = li.dataset.name
-      const isProblems = !!target.closest('#console') || !!target.closest('#error-list')
-      Array.from(menu.querySelectorAll('.ctx-item')).forEach(it => {
-        const scope = it.getAttribute('data-scope') || 'both'
-        if(scope === 'both') it.style.display = ''
-        else if(scope === 'file') it.style.display = filename ? '' : 'none'
-        else if(scope === 'global') it.style.display = filename ? 'none' : ''
-        else if(scope === 'console') it.style.display = isProblems ? '' : 'none'
-      })
-      menu.style.display = 'block'
-      menu.style.left = e.clientX + 'px'
-      menu.style.top = e.clientY + 'px'
-      menu.dataset.target = filename || (isProblems ? 'console' : '')
-    })
     editor.session.setMode('ace/mode/html')
     // Bind editor keys to open the custom search panel and navigate matches
     try{
@@ -324,7 +295,7 @@
           outlineEl.appendChild(el)
         })
       }
-      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate(); debouncedLint(); if(active) buffers[active] = editor.getValue() })
+      editor.getSession().on('change', ()=> { buildOutline(); scheduleDirtyUpdate(); debouncedLint() })
       // expose buildOutline for openFile to refresh outline immediately
       buildOutlineFn = buildOutline
       editor.selection.on('changeCursor', ()=> {})
@@ -504,102 +475,6 @@
 
   }
 
-  // Register a lightweight Ace mode for .euph/.huph files to provide basic colouring
-  function registerEuphMode(){
-    try{
-      if(euphModeInstance || !window.ace) return
-      const oop = ace.require('ace/lib/oop')
-      const TextMode = ace.require('ace/mode/text').Mode
-      const TextHighlightRules = ace.require('ace/mode/text_highlight_rules').TextHighlightRules
-
-      const EuphHighlightRules = function(){
-        const measureDurations = 'semiquaver|quaver|minim|crochet|crotchet|demisemiquaver'
-        const tuplets = 'triplet|quintuplet|sextuplet|septuplet|octuplet|nontuplet|dectuplet|undectuplet|duodectuplet'
-        const otherCommands = 'tremolo|measure'
-        const durations = Array.from(DURATIONS).join('|')
-        this.$rules = {
-          start: [
-            { token: 'euph_measure_duration', regex: '\\b(' + measureDurations + ')Measure\\b', caseInsensitive: true },
-            { token: 'euph_tuplet', regex: '\\b(' + tuplets + ')\\b', caseInsensitive: true },
-            { token: 'euph_command', regex: '\\b(' + otherCommands + ')\\b', caseInsensitive: true },
-            { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
-            { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
-            { token: 'euph_chord', regex: '\\[.*?\\]' },
-            { token: 'comment', regex: '/\\*[\\s\\S]*?\\*/' },
-            { token: 'euph_rest', regex: '\\brest\\b', caseInsensitive: true },
-            { token: 'euph_bar', regex: '\\|' },
-            { token: 'euph_tupletp', regex: '-' },
-            { defaultToken: 'text' }
-          ]
-        }
-      }
-      oop.inherits(EuphHighlightRules, TextHighlightRules)
-
-      const Mode = function(){
-        this.HighlightRules = EuphHighlightRules
-      }
-      oop.inherits(Mode, TextMode)
-      Mode.prototype.$id = 'ace/mode/euph'
-      try{
-        // define module so Ace can reference by name
-        ace.define('ace/mode/euph', ['require','exports','module','ace/lib/oop','ace/mode/text','ace/mode/text_highlight_rules'], function(require, exports, module){
-          const oop = require('ace/lib/oop')
-          const TextMode = require('ace/mode/text').Mode
-          const TextHighlightRules = require('ace/mode/text_highlight_rules').TextHighlightRules
-          function EuphHighlightRulesLocal(){
-            const measureDurations = 'semiquaver|quaver|minim|crochet|crotchet|demisemiquaver'
-            const tuplets = 'triplet|quintuplet|sextuplet|septuplet|octuplet|nontuplet|dectuplet|undectuplet|duodectuplet'
-            const otherCommands = 'tremolo|measure'
-            const durations = Array.from(DURATIONS).join('|')
-            this.$rules = {
-              start: [
-                { token: 'euph_measure_duration', regex: '\\b(' + measureDurations + ')Measure\\b', caseInsensitive: true },
-                { token: 'euph_tuplet', regex: '\\b(' + tuplets + ')\\b', caseInsensitive: true },
-                { token: 'euph_command', regex: '\\b(' + otherCommands + ')\\b', caseInsensitive: true },
-                { token: 'euph_duration', regex: '\\b(' + durations + ')\\b', caseInsensitive: true },
-                { token: 'euph_pitch', regex: '\\b[a-g][#`n]?\\d\\b', caseInsensitive: true },
-                { token: 'euph_chord', regex: '\\[.*?\\]' },
-                { token: 'comment', regex: '/\\*[\\s\\S]*?\\*/' },
-                { token: 'euph_rest', regex: '\\brest\\b', caseInsensitive: true },
-                { token: 'euph_bar', regex: '\\|' },
-                { token: 'euph_tupletp', regex: '-' },
-                { defaultToken: 'text' }
-              ]
-            }
-          }
-          oop.inherits(EuphHighlightRulesLocal, TextHighlightRules)
-          const ModeLocal = function(){ this.HighlightRules = EuphHighlightRulesLocal }
-          oop.inherits(ModeLocal, TextMode)
-          exports.Mode = ModeLocal
-        })
-        euphModeInstance = 'ace/mode/euph'
-        // inject styling for euph tokens to mimic euph.html colours
-        try{
-          const sid = 'mini-vsc-euph-styles'
-          if(!document.getElementById(sid)){
-            const s = document.createElement('style')
-            s.id = sid
-            s.textContent = `
-              .ace_editor .ace_euph_pitch { color: #00ff00; }
-              .ace_editor .ace_euph_duration { color: #00bfff; }
-              .ace_editor .ace_euph_measure_duration { color: #ff5555; }
-              .ace_editor .ace_euph_tuplet { color: #ff00ff; }
-              .ace_editor .ace_euph_command { color: #ffa500; }
-              .ace_editor .ace_euph_rest { color: #ffff00; }
-              .ace_editor .ace_euph_chord { color: #00ffff; }
-              .ace_editor .ace_comment { color: #888; }
-              .ace_editor .ace_euph_bar, .ace_editor .ace_euph_tupletp { color: #ffffff; }
-            `
-            document.head.appendChild(s)
-          }
-        }catch(e){}
-      }catch(e){
-        // fallback to instance when define fails
-        euphModeInstance = new Mode()
-      }
-    }catch(e){ console.warn('registerEuphMode failed', e) }
-  }
-
   // helper debounce
   function debounce(fn, delay){
     let t = null
@@ -629,147 +504,7 @@
     }catch(e){}
   }
   function saveToStorage(){
-    try{
-      // sanitize files before storing: keep strings and folder markers
-      const safe = {}
-      Object.keys(files).forEach(k => {
-        const v = files[k]
-        if(typeof v === 'string' || v === '__folder__') safe[k] = v
-      })
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(safe))
-      files = Object.assign({}, safe)
-    }catch(e){ console.error('saveToStorage', e) }
-    updatePlayMenuVisibility()
-  }
-
-  function buildTree(){
-    const tree = {}
-    for(const path in files){
-      if(files[path] === '__folder__'){
-        const parts = path.split('/').slice(0, -1)
-        let current = tree
-        for(const part of parts){
-          if(!current[part]) current[part] = {}
-          current = current[part]
-        }
-      }else{
-        const parts = path.split('/')
-        let current = tree
-        for(let i=0; i<parts.length; i++){
-          const part = parts[i]
-          if(i === parts.length - 1){
-            current[part] = files[path]
-          }else{
-            if(!current[part]) current[part] = {}
-            current = current[part]
-          }
-        }
-      }
-    }
-    return tree
-  }
-
-  function getAvailablePath(desired){
-    if(!files[desired]) return desired
-    // try adding suffix (1), (2), ... before extension
-    const parts = desired.split('/')
-    const base = parts.pop()
-    const prefix = parts.length? parts.join('/') + '/' : ''
-    const m = base.match(/^(.*?)(\.[^.]*)?$/)
-    const nameOnly = m ? m[1] : base
-    const ext = m && m[2] ? m[2] : ''
-    let i = 1
-    while(true){
-      const cand = prefix + nameOnly + ' (' + i + ')' + ext
-      if(!files[cand]) return cand
-      i++
-    }
-  }
-
-  function ensureParentFolders(path){
-    const parts = path.split('/')
-    if(parts.length <= 1) return
-    let cur = ''
-    for(let i=0;i<parts.length-1;i++){
-      cur += parts[i] + '/'
-      if(!files[cur]) files[cur] = '__folder__'
-    }
-  }
-
-  function moveFile(oldPath, newPath){
-    if(oldPath === newPath || !(oldPath in files)) return
-    // avoid accidental overwrites: pick an available path if needed
-    if(files[newPath] && files[newPath] !== '__folder__'){
-      newPath = getAvailablePath(newPath)
-    }
-    // ensure any parent folders for the destination path exist
-    ensureParentFolders(newPath)
-    files[newPath] = files[oldPath]
-    delete files[oldPath]
-    if(buffers[oldPath]){ buffers[newPath] = buffers[oldPath]; delete buffers[oldPath] }
-    if(sessions[oldPath]){ sessions[newPath] = sessions[oldPath]; delete sessions[oldPath] }
-    if(lastSaved[oldPath]){ lastSaved[newPath] = lastSaved[oldPath]; delete lastSaved[oldPath] }
-    if(gutterDecorations[oldPath]){ gutterDecorations[newPath] = gutterDecorations[oldPath]; delete gutterDecorations[oldPath] }
-    const ti = tabs.indexOf(oldPath)
-    if(ti >= 0) tabs[ti] = newPath
-    if(active === oldPath) active = newPath
-    saveToStorage()
-    renderFileList()
-    renderTabs()
-  }
-
-  function getAvailableFolderPath(desired){
-    if(!files[desired]) return desired
-    const base = desired.replace(/\/$/, '')
-    let i = 1
-    while(true){
-      const cand = base + ' (' + i + ')/'
-      if(!files[cand]) return cand
-      i++
-    }
-  }
-
-  function moveFolder(oldPath, destFolder){
-    // oldPath expected to end with '/'
-    if(!oldPath || !oldPath.endsWith('/')) return
-    if(!(oldPath in files)) return
-    // build destination base (destFolder should end with '/').
-    // If destFolder is empty (root), keep it empty to avoid leading '/'.
-    if(destFolder && !destFolder.endsWith('/')) destFolder = destFolder + '/'
-    const folderName = oldPath.replace(/\/$/, '').split('/').pop()
-    let newBase = destFolder + folderName + '/'
-    if(files[newBase]) newBase = getAvailableFolderPath(newBase)
-    ensureParentFolders(newBase)
-    const keys = Object.keys(files)
-    // move all keys under oldPath (including the folder marker)
-    keys.forEach(k => {
-      if(k === oldPath || k.indexOf(oldPath) === 0){
-        const rel = k.substring(oldPath.length)
-        const destKey = newBase + rel
-        files[destKey] = files[k]
-        if(buffers[k]){ buffers[destKey] = buffers[k]; delete buffers[k] }
-        if(sessions[k]){ sessions[destKey] = sessions[k]; delete sessions[k] }
-        if(lastSaved[k]){ lastSaved[destKey] = lastSaved[k]; delete lastSaved[k] }
-        if(gutterDecorations[k]){ gutterDecorations[destKey] = gutterDecorations[k]; delete gutterDecorations[k] }
-        const ti = tabs.indexOf(k); if(ti>=0) tabs[ti] = destKey
-        if(active === k) active = destKey
-        delete files[k]
-      }
-    })
-    saveToStorage(); renderFileList(); renderTabs()
-  }
-
-  function updateBreadcrumb(){
-    const bc = document.getElementById('editor-breadcrumb')
-    if(bc){
-      bc.innerHTML = '<span class="crumb">' + escapeHtml(currentFolder) + '</span>'
-    }
-  }
-
-  function showPlaceholder(){
-    const ph = document.getElementById('editor-placeholder')
-    if(ph) ph.style.display = 'flex'
-    if(editor) editor.setValue('')
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(files))
   }
 
   // Settings persistence: remembers UI options like word wrap, autoRefresh, ui-scale and bottom height
@@ -780,11 +515,6 @@
   }
   function saveSettings(){
     try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateStatus('Settings saved') }catch(e){ console.error('saveSettings', e) }
-  }
-
-  // persist collapsed folder state alongside other settings
-  function persistCollapsedState(){
-    try{ settings.collapsedFolders = Object.assign({}, collapsedFolders); saveSettings() }catch(e){}
   }
   function applySettings(){
     try{
@@ -800,235 +530,60 @@
 
   // UI helpers
   function renderFileList(){
-    const tree = buildTree()
     fileListEl.innerHTML = ''
-    function renderDir(dir, prefix, ul){
-      for(const [name, value] of Object.entries(dir)){
-        const fullPath = prefix + name
-        const li = document.createElement('li')
-        // Normalize dataset name: include trailing slash for folders so
-        // callers can reliably detect folder keys (files store raw paths)
-        li.dataset.name = (typeof value === 'object') ? (fullPath + '/') : fullPath
-        if(typeof value !== 'string') li.classList.add('folder')
-        li.tabIndex = 0
-        li.draggable = true
-        li.addEventListener('dragstart', (e) => { 
-          const dragKey = (typeof value === 'object') ? (fullPath + '/') : fullPath
-          e.dataTransfer.setData('text/plain', dragKey)
-        })
+    Object.keys(files).forEach(name=>{
+      const li = document.createElement('li')
+      li.dataset.name = name
+      li.tabIndex = 0
 
-        // left-side (icon + label)
-        const left = document.createElement('div')
-        left.style.display = 'flex'
-        left.style.alignItems = 'center'
-        left.style.flex = '1'
+      // left-side (icon + label)
+      const left = document.createElement('div')
+      left.style.display = 'flex'
+      left.style.alignItems = 'center'
+      left.style.flex = '1'
 
-        const ico = document.createElement('span')
-        ico.className = 'file-icon'
-        ico.style.marginRight = '8px'
-        ico.style.opacity = '0.95'
-        ico.style.width = '20px'
-        ico.style.display = 'inline-block'
-        ico.style.textAlign = 'center'
-        if(typeof value === 'string'){
-          try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
-        }else{
-          ico.innerHTML = '<span class="msr">folder</span>'
-        }
+      const ico = document.createElement('span')
+      ico.className = 'file-icon'
+      ico.style.marginRight = '8px'
+      ico.style.opacity = '0.95'
+      ico.style.width = '20px'
+      ico.style.display = 'inline-block'
+      ico.style.textAlign = 'center'
+      try{ ico.innerHTML = iconFor(name) }catch(e){ ico.textContent = '' }
 
-        const nameSpan = document.createElement('span')
-        nameSpan.className = 'file-name'
-        nameSpan.textContent = name
-        nameSpan.style.flex = '1'
-        nameSpan.style.cursor = 'pointer'
-        if(typeof value === 'string'){
-          nameSpan.addEventListener('click', ()=> openFile(fullPath))
-          nameSpan.addEventListener('dblclick', (e)=>{ e.stopPropagation(); startRename(fullPath) })
-        }else{
-          // set currentFolder to include trailing slash to simplify concatenation
-          nameSpan.addEventListener('click', () => { currentFolder = fullPath + '/'; active = null; updateBreadcrumb(); showPlaceholder() })
-        }
+      const nameSpan = document.createElement('span')
+      nameSpan.className = 'file-name'
+      nameSpan.textContent = name
+      nameSpan.style.flex = '1'
+      nameSpan.style.cursor = 'pointer'
+      nameSpan.addEventListener('click', ()=> openFile(name))
+      nameSpan.addEventListener('dblclick', (e)=>{ e.stopPropagation(); startRename(name) })
 
-        left.appendChild(ico)
-        left.appendChild(nameSpan)
-        li.appendChild(left)
+      left.appendChild(ico)
+      left.appendChild(nameSpan)
+      li.appendChild(left)
 
-        if(typeof value === 'string'){
-          // delete button for files — wrap into a header so the delete
-          // button always aligns to the right regardless of filename width
-          const del = document.createElement('button')
-          del.className = 'btn-close small'
-          del.title = 'Delete file'
-          del.innerHTML = '<span class="msr">delete</span>'
-          del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(fullPath) })
+      // delete button
+      const del = document.createElement('button')
+      del.className = 'btn-close small'
+      del.title = 'Delete file'
+      del.innerHTML = '<span class="msr">delete</span>'
+      del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(name) })
+      li.appendChild(del)
 
-          // show dirty indicator
-          const buf = (buffers.hasOwnProperty(fullPath)) ? buffers[fullPath] : ( (fullPath === active && editor) ? editor.getValue() : files[fullPath] || '' )
-          const dirty = buf !== (files[fullPath]||'')
-          if(dirty){
-            const d = document.createElement('span')
-            d.className = 'dirty-indicator'
-            d.title = 'Unsaved changes'
-            nameSpan.appendChild(d)
-          }
-
-          // create a row container so the left content and delete button are
-          // spaced apart and the delete button is always at the same x-position
-          try{
-            if(left && left.parentNode === li) li.removeChild(left)
-            const row = document.createElement('div')
-            row.className = 'file-row'
-            row.style.display = 'flex'
-            row.style.justifyContent = 'space-between'
-            row.style.alignItems = 'center'
-            row.appendChild(left)
-            row.appendChild(del)
-            li.appendChild(row)
-          }catch(e){
-            // fallback
-            li.appendChild(del)
-          }
-        }else{
-          // folder, add a toggle and sub ul
-          const toggle = document.createElement('span')
-          toggle.className = 'folder-toggle msr'
-          toggle.textContent = collapsedFolders[fullPath + '/'] ? 'chevron_right' : 'expand_more'
-          toggle.style.cursor = 'pointer'
-          toggle.style.marginRight = '6px'
-          left.insertBefore(toggle, nameSpan)
-
-          const subUl = document.createElement('ul')
-          subUl.className = 'folder-children' + (collapsedFolders[fullPath + '/'] ? ' collapsed' : '')
-          li.appendChild(subUl)
-          // render children with a trailing prefix so all child paths are correct
-          renderDir(value, fullPath + '/', subUl)
-
-          // Drop handlers: use the folder path (with trailing slash) to build
-          // the destination path consistently.
-          const folderDest = fullPath + '/'
-          subUl.addEventListener('drop', (e) => {
-            e.preventDefault();
-            const dragged = e.dataTransfer.getData('text/plain');
-            if(!dragged || !(dragged in files)) return;
-            if(files[dragged] === '__folder__'){
-              moveFolder(dragged, folderDest)
-            }else{
-              const fileName = dragged.split('/').pop();
-              moveFile(dragged, folderDest + fileName)
-            }
-          })
-          subUl.addEventListener('dragover', (e) => e.preventDefault())
-
-          // delete button for folders (will be moved into header)
-          const del = document.createElement('button')
-          del.className = 'btn-close small'
-          del.title = 'Delete folder'
-          del.innerHTML = '<span class="msr">delete</span>'
-          del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteFile(folderDest) })
-
-          // Replace the flat `li` layout with a header container so the
-          // children `ul` appears underneath the folder header instead of
-          // beside it (fixes files appearing to the right of folders).
-          try{
-            // remove the previously appended `left` and insert into header
-            if(left && left.parentNode === li) li.removeChild(left)
-            const header = document.createElement('div')
-            header.className = 'folder-header'
-            header.style.display = 'flex'
-            header.style.justifyContent = 'space-between'
-            header.style.alignItems = 'center'
-            header.appendChild(left)
-            header.appendChild(del)
-            // insert header before the children list so children render below
-            li.insertBefore(header, subUl)
-          }catch(e){}
-
-          li.addEventListener('drop', (e) => {
-            e.preventDefault();
-            const dragged = e.dataTransfer.getData('text/plain');
-            if(!dragged || dragged === fullPath || !(dragged in files)) return;
-            if(files[dragged] === '__folder__'){
-              moveFolder(dragged, folderDest)
-            }else{
-              const fileName = dragged.split('/').pop();
-              moveFile(dragged, folderDest + fileName)
-            }
-          })
-          li.addEventListener('dragover', (e) => e.preventDefault())
-
-          // toggle click: expand/collapse using CSS class for smooth transition
-          toggle.addEventListener('click', (e)=>{
-            e.stopPropagation(); const key = fullPath + '/'; collapsedFolders[key] = !collapsedFolders[key];
-            if(collapsedFolders[key]) subUl.classList.add('collapsed')
-            else subUl.classList.remove('collapsed')
-            toggle.textContent = collapsedFolders[key] ? 'chevron_right' : 'expand_more'
-            try{ persistCollapsedState() }catch(e){}
-          })
-        }
-
-        if(fullPath === active) li.classList.add('active')
-        ul.appendChild(li)
+      // show dirty indicator if buffer differs from saved version (works for non-active files)
+      const buf = (buffers.hasOwnProperty(name)) ? buffers[name] : ( (name === active && editor) ? editor.getValue() : files[name] || '' )
+      const dirty = buf !== (files[name]||'')
+      if(dirty){
+        const d = document.createElement('span')
+        d.className = 'dirty-indicator'
+        d.title = 'Unsaved changes'
+        nameSpan.appendChild(d)
       }
-    }
-    // Render a virtual top-level "Project" folder to give the illusion
-    // that the whole workspace is inside a single project container.
-    // Users can drop files onto this project header to move them to root.
-    const projectLi = document.createElement('li')
-    projectLi.className = 'folder project-root'
 
-    const projLeft = document.createElement('div')
-    projLeft.style.display = 'flex'
-    projLeft.style.alignItems = 'center'
-    projLeft.style.flex = '1'
-
-    const projIco = document.createElement('span')
-    projIco.className = 'file-icon'
-    projIco.style.marginRight = '8px'
-    projIco.innerHTML = '<span class="msr">folder_open</span>'
-
-    const projToggle = document.createElement('span')
-    projToggle.className = 'folder-toggle msr'
-    projToggle.textContent = collapsedFolders['project/'] ? 'chevron_right' : 'expand_more'
-    projToggle.style.cursor = 'pointer'
-    projToggle.style.marginRight = '6px'
-
-    const projLabel = document.createElement('span')
-    projLabel.className = 'file-name'
-    projLabel.textContent = 'Project'
-    projLabel.style.flex = '1'
-    projLabel.style.cursor = 'pointer'
-    projLabel.addEventListener('click', ()=>{ currentFolder = ''; active = null; updateBreadcrumb(); showPlaceholder() })
-
-    projLeft.appendChild(projIco)
-    projLeft.appendChild(projToggle)
-    projLeft.appendChild(projLabel)
-
-    const projHeader = document.createElement('div')
-    projHeader.className = 'folder-header project-header'
-    projHeader.style.display = 'flex'
-    projHeader.style.justifyContent = 'space-between'
-    projHeader.style.alignItems = 'center'
-    projHeader.appendChild(projLeft)
-
-    const projChildren = document.createElement('ul')
-    projChildren.className = 'folder-children' + (collapsedFolders['project/'] ? ' collapsed' : '')
-    projChildren.style.listStyle = 'none'
-    // render the real file tree inside project children
-    renderDir(tree, '', projChildren)
-
-    // drop to move to project root
-    projChildren.addEventListener('drop', (e)=>{ e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if(dragged && typeof files[dragged] === 'string'){ const fileName = dragged.split('/').pop(); moveFile(dragged, getAvailablePath(fileName)) } })
-    projChildren.addEventListener('dragover', (e)=> e.preventDefault())
-
-    // toggle handler
-    projToggle.addEventListener('click', (e)=>{ e.stopPropagation(); const key = 'project/'; collapsedFolders[key] = !collapsedFolders[key]; if(collapsedFolders[key]) projChildren.classList.add('collapsed'); else projChildren.classList.remove('collapsed'); projToggle.textContent = collapsedFolders[key] ? 'chevron_right' : 'expand_more'; try{ persistCollapsedState() }catch(e){} })
-
-    projectLi.appendChild(projHeader)
-    projectLi.appendChild(projChildren)
-    // Accept drops on the header itself so users can drop onto the Project label
-    projHeader.addEventListener('drop', (e)=>{ e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if(dragged && typeof files[dragged] === 'string'){ const fileName = dragged.split('/').pop(); moveFile(dragged, getAvailablePath(fileName)) } })
-    projHeader.addEventListener('dragover', (e)=> e.preventDefault())
-    fileListEl.appendChild(projectLi)
+      if(name === active) li.classList.add('active')
+      fileListEl.appendChild(li)
+    })
   }
 
   // Inline create: insert an input at top of file list for naming the new file
@@ -1071,7 +626,7 @@
     function showInlineError(msg){ err.textContent = msg; err.style.display = ''; input.focus(); input.select() }
 
     function commit(){
-      let name = currentFolder ? currentFolder + (input.value || '').trim() : (input.value || '').trim()
+      let name = (input.value || '').trim()
       if(!name){ cleanup(); return }
       // auto-append default extension if user omitted one
       if(!/\.[a-z0-9]+$/i.test(name)) name += '.html'
@@ -1094,64 +649,6 @@
     input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') commit(); else if(e.key==='Escape'){ cleanup() } })
     // On blur we cancel the inline create to avoid focus/blur loops with modals.
     input.addEventListener('blur', ()=> { setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
-  }
-
-  function startCreateFolder(){
-    const list = document.getElementById('file-list')
-    if(!list) return
-    const li = document.createElement('li')
-    li.className = 'creating'
-    const ico = document.createElement('span')
-    ico.className = 'file-icon'
-    ico.style.marginRight = '8px'
-    ico.style.width = '20px'
-    ico.style.display = 'inline-block'
-    ico.style.textAlign = 'center'
-    ico.innerHTML = `<span class="msr">create_new_folder</span>`
-    li.appendChild(ico)
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.placeholder = 'foldername'
-    input.style.flex = '1'
-    input.style.padding = '6px 8px'
-    input.style.borderRadius = '6px'
-    input.style.border = '1px solid rgba(255,255,255,0.04)'
-    input.style.background = 'rgba(255,255,255,0.02)'
-    input.style.color = 'var(--muted)'
-    li.appendChild(input)
-    const err = document.createElement('div')
-    err.style.color = '#ff6b6b'
-    err.style.fontSize = '12px'
-    err.style.marginTop = '6px'
-    err.style.display = 'none'
-    li.appendChild(err)
-    list.insertBefore(li, list.firstChild)
-    input.focus(); input.select()
-
-    function cleanup(){ li.parentNode.removeChild(li) }
-    function showInlineError(msg){ err.textContent = msg; err.style.display = 'block' }
-
-    function commit(){
-      const name = currentFolder ? currentFolder + input.value.trim() : input.value.trim()
-      if(!name){ cleanup(); return }
-      // validate the raw input (disallow slashes in the typed folder name)
-      const raw = input.value.trim()
-      if(raw.includes('/') || raw.includes('\\')){ showInlineError('Folder name cannot contain slashes'); return }
-      const key = name + '/'
-      if(files[key]){ showInlineError('Folder already exists'); return }
-      // ensure parent folders exist
-      ensureParentFolders(key)
-      files[key] = '__folder__'
-      saveToStorage()
-      renderFileList()
-      cleanup()
-    }
-
-    input.addEventListener('keydown', (e)=>{
-      if(e.key === 'Enter') commit()
-      else if(e.key === 'Escape') cleanup()
-    })
-    input.addEventListener('blur', ()=>{ setTimeout(()=>{ if(document.activeElement !== input) cleanup() }, 120) })
   }
 
   // Start inline rename of a file (blur-safe, inline errors)
@@ -1208,11 +705,6 @@
       }
       files[safe] = files[currentName]
       delete files[currentName]
-      // update buffers etc
-      if(buffers[currentName]){ buffers[safe] = buffers[currentName]; delete buffers[currentName] }
-      if(sessions[currentName]){ sessions[safe] = sessions[currentName]; delete sessions[currentName] }
-      if(lastSaved[currentName]){ lastSaved[safe] = lastSaved[currentName]; delete lastSaved[currentName] }
-      if(gutterDecorations[currentName]){ gutterDecorations[safe] = gutterDecorations[currentName]; delete gutterDecorations[currentName] }
       const ti = tabs.indexOf(currentName)
       if(ti>=0) tabs[ti] = safe
       if(active === currentName) active = safe
@@ -1230,596 +722,6 @@
   try{ if(typeof startCreateFile === 'function') var startCreateFileInline = startCreateFile }catch(e){}
   try{ if(typeof startRename === 'function') var startRenameInline = startRename }catch(e){}
 
-  /* --- Euphonia multi-file playback (.huph/.euph) --- */
-  const AudioCtx = new (window.AudioContext || window.webkitAudioContext)()
-  const baseFreqs = { c:261.63, d:293.66, e:329.63, f:349.23, g:392, a:440, b:493.88 }
-  const DURATIONS = new Set(['crotchet','quaver','semiquaver','semiquavers','demisemiquaver','minim','semibreve','measure'])
-  function calculateMeasureDuration(timeSig, bpm){
-    if(!timeSig || !timeSig.numerator || !timeSig.denominator) return 2 // default 2 seconds
-    const beats = timeSig.numerator
-    const beatType = timeSig.denominator
-    const beatDuration = (60 / bpm) * (4 / beatType) // assuming 4 is crotchet
-    return beats * beatDuration
-  }
-  function isNoteToken(tok){ return /^[a-g][#`n]?\d$/i.test(tok) }
-  function isDurationToken(tok){ return tok && DURATIONS.has(tok.toLowerCase()) }
-  function noteFreq(note, keyAcc, accState){
-    const m = note.match(/^([a-g])([#`n]?)(\d)$/i); if(!m) return 440; let [, letter, acc, oct] = m; letter = letter.toLowerCase(); oct = parseInt(oct,10);
-    if(acc) accState[letter] = acc; else if(accState[letter]) acc = accState[letter];
-    if(!acc){ const keyMap = {}; (keyAcc||[]).forEach(k=>{ const l=k[0].toLowerCase(); if(k.endsWith('#')) keyMap[l]='#'; else if(k.endsWith('`')) keyMap[l]='`'; else keyMap[l]='' }); acc = keyMap[letter] || '' }
-    let f = baseFreqs[letter]; if(acc === '`') f *= Math.pow(2, -1/12); else if(acc === '#') f *= Math.pow(2, 1/12); return f * Math.pow(2, oct - 4)
-  }
-
-  function playOsc(freq, dur, waveType='triangle', gainOverride=null){
-    return new Promise(resolve=>{
-      try{
-        if(playbackState.stopRequested || playbackState.isPaused) return resolve();
-        const o = AudioCtx.createOscillator(); const g = AudioCtx.createGain(); o.type = waveType; o.frequency.value = freq; g.gain.value = gainOverride!==null? gainOverride : 0.08; o.connect(g); g.connect(AudioCtx.destination);
-        const startAt = Math.max(AudioCtx.currentTime + 0.005, AudioCtx.currentTime)
-        playbackState.currentOscillators.push(o)
-        o.start(startAt)
-        o.stop(startAt + dur)
-        o.onended = function(){ try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}; resolve() }
-      }catch(e){ resolve() }
-    })
-  }
-
-  // parse header text (.huph). Accept JSON { "voiceJson": "..", "euphFiles": [..] } or simple lines: first=voicejson, rest=euph paths
-  function parseHuphText(text){
-    try{
-      const j = safeJsonParse(text)
-      if(j && (j.voiceJson || j.voiceJSON) && j.euphFiles) return { voiceJson: j.voiceJson||j.voiceJSON, euphFiles: Array.isArray(j.euphFiles)? j.euphFiles : [j.euphFiles] }
-    }catch(e){}
-    const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean)
-    if(lines.length===0) return null
-    return { voiceJson: lines[0], euphFiles: lines.slice(1) }
-  }
-
-  // forgiving JSON parser: strip BOM, comments, trailing commas then parse
-  function safeJsonParse(src){
-    if(!src && src !== '') return null
-    try{ return JSON.parse(src) }catch(_){ }
-    try{
-      let s = String(src)
-      // strip BOM
-      s = s.replace(/^\uFEFF/, '')
-      // try to trim any leading garbage before first object/array
-      const firstBrace = s.indexOf('{')
-      const firstBracket = s.indexOf('[')
-      const firstOpen = (firstBrace === -1) ? firstBracket : (firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket))
-      if(firstOpen > 0) s = s.slice(firstOpen)
-      // remove block comments
-      s = s.replace(/\/\*[\s\S]*?\*\//g, '')
-      // remove line comments
-      s = s.replace(/(^|\s)\/\/.*$/gm, '')
-      // remove trailing commas in objects/arrays
-      s = s.replace(/,\s*([}\]])/g, '$1')
-      return JSON.parse(s)
-    }catch(e){
-      // rethrow to let caller show meaningful message
-      throw new Error((e && e.message) ? e.message : 'Invalid JSON')
-    }
-  }
-
-  let playbackState = { isPlaying:false, isPaused:false, stopRequested:false, currentOscillators:[] }
-  function stopPlayback(){ playbackState.stopRequested=true; playbackState.isPlaying=false; playbackState.isPaused=false; playbackState.currentOscillators.forEach(o=>{ try{o.stop()}catch(e){} }); playbackState.currentOscillators=[] }
-  function pausePlayback(){ playbackState.isPaused=true; playbackState.isPlaying=false; playbackState.currentOscillators.forEach(o=>{ try{o.stop()}catch(e){} }); playbackState.currentOscillators=[] }
-
-  // show/hide Play menu based on whether any .huph file exists in the project
-  function updatePlayMenuVisibility(){
-    try{
-      const playMenu = document.getElementById('menu-play');
-      if(!playMenu) return;
-      const hasHuph = Object.keys(files).some(name => name && name.toLowerCase().endsWith('.huph'));
-      playMenu.style.display = hasHuph ? '' : 'none';
-    }catch(e){}
-  }
-  // wire Play menu actions
-  try{
-    const playAllBtn = document.getElementById('play-all-voices'); if(playAllBtn) playAllBtn.addEventListener('click', ()=>{ playAllVoicesForActiveHeader() })
-    const pauseBtn = document.getElementById('play-pause'); if(pauseBtn) pauseBtn.addEventListener('click', ()=> pausePlayback())
-    const stopBtnEl = document.getElementById('play-stop'); if(stopBtnEl) stopBtnEl.addEventListener('click', ()=> stopPlayback())
-  }catch(e){}
-
-  // main orchestrator: find a .huph header and play referenced .euph files
-  async function playAllVoicesForActiveHeader(){
-    console.log('Starting playAllVoicesForActiveHeader')
-    try{
-      await AudioCtx.resume()
-      console.log('AudioContext resumed')
-    }catch(e){ console.warn('AudioContext resume failed', e) }
-
-    function durToSec(d,bpm,timeSig){ if(!d) return 60/bpm/4; switch(d.toLowerCase()){ case 'crochet': case 'crotchet': return 60/bpm; case 'quaver': return 30/bpm; case 'semiquaver': case 'semiquavers': return 15/bpm; case 'demisemiquaver': return 7.5/bpm; case 'minim': return 120/bpm; case 'semibreve': case 'semibreve': return 240/bpm; case 'measure': return (timeSig.numerator / timeSig.denominator) * 240 / bpm; default: return 60/bpm/4 } }
-    let headerFile = active && active.toLowerCase().endsWith('.huph') ? active : null
-    if(!headerFile){
-      // find any .huph file
-      const huphFiles = Object.keys(files).filter(name => name && name.toLowerCase().endsWith('.huph'))
-      if(huphFiles.length === 0){ showDialog('No header','No .huph header file found in project.'); return }
-      headerFile = huphFiles[0] // use the first one
-    }
-    const headerText = (buffers[headerFile] !== undefined) ? buffers[headerFile] : (files[headerFile] || '')
-    const header = parseHuphText(headerText)
-    if(!header){ showDialog('Invalid header','Could not parse the .huph header file. Expected JSON or newline list.'); return }
-    // resolve basenames against stored files in memory; header paths may be basenames
-    // resolve voice JSON: support three forms
-    // 1) header.voiceJson is an object (already parsed)
-    // 2) header.voiceJson is a JSON string (inline)
-    // 3) header.voiceJson is a filename -> load from `files`
-    let voicesJson = {}
-    try{
-      if(typeof header.voiceJson === 'object' && header.voiceJson !== null){
-        voicesJson = header.voiceJson
-      } else if(typeof header.voiceJson === 'string'){
-        const vstr = header.voiceJson.trim()
-        if(vstr.startsWith('{')){
-          // inline JSON string
-          voicesJson = safeJsonParse(vstr)
-        } else {
-          // treat as filename; support path or basename
-          const vname = vstr.split(/[\\/]/).pop()
-          if(!files[vname]){ showDialog('Missing', 'Voice JSON "' + vname + '" is not present in project files. Add it and try again.'); return }
-          voicesJson = safeJsonParse(files[vname])
-        }
-      } else {
-        showDialog('Missing','Voice JSON reference is invalid in header. Provide a filename or inline JSON.'); return
-      }
-    }catch(e){ showDialog('Invalid JSON','Failed to parse voice JSON: ' + (e && e.message)); return }
-    // collect voices
-    const voices = []
-    for(let i=0;i<header.euphFiles.length;i++){
-      const path = header.euphFiles[i]; const base = path.split(/[\\/]/).pop(); if(!files[base]){ showDialog('Missing', 'Euph file "' + base + '" not found in project.'); return }
-      const number = String(i+1)
-      let wave = 'triangle'
-      let volume = 1
-      const entry = voicesJson[number]
-      if(entry !== undefined){
-        if(Array.isArray(entry)){
-          wave = entry[0] || 'triangle'
-          const v = entry.length > 1 ? Number(entry[1]) : 1
-          volume = (Number.isFinite(v) && v >= 0) ? v : 1
-        }else if(typeof entry === 'object' && entry !== null){
-          wave = entry.wave || entry.type || 'triangle'
-          const v = Number(entry.volume !== undefined ? entry.volume : (entry.vol !== undefined ? entry.vol : 1))
-          volume = (Number.isFinite(v) && v >= 0) ? v : 1
-        }else{
-          wave = String(entry) || 'triangle'
-          volume = 1
-        }
-      }
-      voices.push({ name: base, content: files[base], wave, volume })
-    }
-    // play voices in parallel measure-by-measure similar to euph editor
-    playbackState.stopRequested=false; playbackState.isPaused=false; playbackState.isPlaying=true; playbackState.currentOscillators=[]
-
-    // key signature map 
-    const keySignatures = {
-      'C Major': [], 'C minor': ['B`', 'E`', 'A`'],
-      'C# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#', 'B#'], 'C# minor': ['F#', 'C#', 'G#'],
-      'D` Major': ['B`', 'E`', 'A`', 'D`', 'G`'], 'D` minor': ['E`', 'A`', 'D`', 'G`'],
-      'D Major': ['F#', 'C#'], 'D minor': ['B`'],
-      'D# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'], 'D# minor': ['F#', 'C#', 'G#', 'D#'],
-      'E Major': ['F#', 'C#', 'G#', 'D#'], 'E minor': ['F#'],
-      'F Major': ['B`'], 'F minor': ['B`', 'E`', 'A`', 'D`'],
-      'F# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'], 'F# minor': ['F#', 'C#', 'G#'],
-      'G Major': ['F#'], 'G minor': ['B`', 'E`'],
-      'G# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#', 'B#'], 'G# minor': ['F#', 'C#', 'G#', 'D#'],
-      'A Major': ['F#', 'C#', 'G#'], 'A minor': [],
-      'A# Major': ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'], 'A# minor': ['F#', 'C#', 'G#', 'D#'],
-      'B Major': ['F#', 'C#', 'G#', 'D#', 'A#'], 'B minor': ['F#', 'C#'],
-      "B` Major": ['B`', 'E`', 'A`', 'D`', 'G`'], "B` minor": ['B`', 'E`', 'A`', 'D`', 'G`'],
-      "E` Major": ['B`', 'E`', 'A`', 'D`'], "E` minor": ['B`', 'E`', 'A`'],
-      "A` Major": ['B`', 'E`', 'A`'], "A` minor": ['B`', 'E`'],
-      "D`` Major": ['B`', 'E`', 'A`', 'D`'], "D`` minor": ['B`', 'E`', 'A`'],
-      "G`` Major": ['B`', 'E`', 'A`'], "G`` minor": ['B`', 'E`'],
-      "C`` Major": ['B`'], "C`` minor": ['B`', 'E`', 'A`', 'D`', 'G`', 'C`']
-    }
-
-    function parseEditorContent(text){
-      text = text.replace(/\/\*[\s\S]*?\*\//g, '')
-      const rawLines = text.split('\n').map(l=>l.trim()).filter(Boolean)
-      if(rawLines.length===0) return null
-      let key = 'C Major', bpm = 120, timeSig = {numerator:4, denominator:4}
-      const headerMatch = rawLines[0] && rawLines[0].match(/\(?\s*([^,]+)\s*,\s*([0-9]+)bpm(?:,\s*([0-9]+)\/([0-9]+))?/i)
-      if(headerMatch){ 
-        key = headerMatch[1].trim(); 
-        bpm = parseInt(headerMatch[2],10) || 120; 
-        if(headerMatch[3] && headerMatch[4]){
-          timeSig = {numerator: parseInt(headerMatch[3]), denominator: parseInt(headerMatch[4])};
-        }
-      }
-      const keyAcc = keySignatures[key] || []
-      const contentLines = headerMatch ? rawLines.slice(1) : rawLines
-      return { bpm, keyAcc, timeSig, contentLines }
-    }
-    function splitMeasures(lines){ return lines.flatMap(line => line.split('|').map(m=>m.trim()).filter(Boolean)) }
-
-    const parsed = voices.map(v=>{ const p = parseEditorContent(v.content); return { meta:v, parsed:p, measures: splitMeasures(p.contentLines) } })
-    const maxMeasures = Math.max(...parsed.map(p=>p.measures.length))
-    console.log('Parsed', parsed.length, 'voices, maxMeasures', maxMeasures)
-
-    function collectMeasureEvents(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig, events){
-      if(!tokens || tokens.length===0) return
-      // collect note events with precise timing
-      const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.01)
-      let curTime = startNow
-      let i = 0
-      let measureDurOverride = null
-      const accState = {}
-
-      const isStaccatoDur = (d) => {
-        if(!d) return false
-        const dd = d.toLowerCase()
-        return dd === 'semiquaver' || dd === 'demisemiquaver' || dd === 'quaver' || dd === 'crotchet'
-      }
-
-      while(i<tokens.length){
-        if(playbackState.stopRequested) break
-        const t = tokens[i]
-        if(!t){ i++; continue }
-        if(['semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure'].includes(t)){
-          measureDurOverride = t.replace('Measure','').toLowerCase(); i++; continue
-        }
-        if(t.toLowerCase() === 'rest'){
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          curTime += baseDur
-          i += isDurationToken(next)? 2 : 1
-          continue
-        }
-        if(['triplet','quintuplet','sextuplet','septuplet','octuplet','nontuplet','dectuplet','undectuplet','duodectuplet'].includes(t.toLowerCase())){
-          const tupletType = t.toLowerCase()
-          const base = tokens[i+1]
-          i += 2
-          if(tokens[i] === '-'){
-            i++
-            const group = []
-            while(i<tokens.length && tokens[i] !== '-') { group.push(tokens[i]); i++ }
-            if(tokens[i] === '-') i++
-            const baseDur = durToSec(base, bpm, timeSig)
-            let unitForTuplet = 'quaver'
-            if(tupletType === 'triplet'){
-              if(base.toLowerCase().startsWith('semiquaver')) unitForTuplet = 'quaver'
-              else if(base.toLowerCase().startsWith('quaver')) unitForTuplet = 'crochet'
-              else unitForTuplet = 'quaver'
-            } else if(tupletType === 'quintuplet'){
-              unitForTuplet = base
-            } else if(tupletType === 'septuplet'){
-              unitForTuplet = base
-            }
-            const tupletDivisors = {
-              'triplet': 3,
-              'quintuplet': 5,
-              'sextuplet': 6,
-              'septuplet': 7,
-              'octuplet': 8,
-              'nontuplet': 9,
-              'dectuplet': 10,
-              'undectuplet': 11,
-              'duodectuplet': 12
-            }
-            const divisor = tupletDivisors[tupletType] || 3
-            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / divisor
-            for(const tok of group){
-              if(playbackState.stopRequested) break
-              if(tok.startsWith('[') && tok.endsWith(']')){
-                const pitches = tok.slice(1,-1).split(/\s+/).filter(Boolean)
-                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
-                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
-                for(const p of pitches){
-                  if(isNoteToken(p)){
-                    const freq = noteFreq(p, keyAcc, accState)
-                    events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
-                  }
-                }
-                curTime += scaledDur
-              } else if(isNoteToken(tok)){
-                const freq = noteFreq(tok, keyAcc, accState)
-                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
-                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
-                events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
-                curTime += scaledDur
-              } else if(tok.toLowerCase() === 'rest'){
-                curTime += scaledDur
-              }
-            }
-            continue
-          }
-        }
-        if(isNoteToken(t)){
-          let forceFull = false
-          if(tokens[i+1] === 's'){
-            forceFull = true
-            i++
-          }
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          if(isDurationToken(next)) i += 2; else i += 1
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
-          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
-          const freq = noteFreq(t, keyAcc, accState)
-          events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
-          curTime += baseDur
-          continue
-        }
-        if(t.startsWith('[') && t.endsWith(']')){
-          const pitches = t.slice(1,-1).split(/\s+/).filter(Boolean)
-          let forceFull = false
-          if(tokens[i+1] === 's'){
-            forceFull = true
-            i++
-          }
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          if(isDurationToken(next)) i += 2; else i += 1
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
-          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
-          for(const p of pitches){
-            if(isNoteToken(p)){
-              const freq = noteFreq(p, keyAcc, accState)
-              events.push({ startTime: curTime, endTime: curTime + playDur, freq, gain: gainOverride })
-            }
-          }
-          curTime += baseDur
-          continue
-        }
-        i++
-      }
-    }
-
-    function createVoiceOscillator(events, waveType, baseGain, totalDuration){
-      if(events.length === 0) return
-
-      try{
-        const o = AudioCtx.createOscillator()
-        const g = AudioCtx.createGain()
-        o.type = waveType
-        o.frequency.value = 440 // default frequency
-        g.gain.value = 0 // start silent
-        o.connect(g)
-        g.connect(AudioCtx.destination)
-        playbackState.currentOscillators.push(o)
-
-        const startTime = AudioCtx.currentTime + 0.01
-        const endTime = startTime + totalDuration
-
-        // Sort events by start time
-        events.sort((a, b) => a.startTime - b.startTime)
-
-        // Create a list of all gain change events (start and end)
-        const gainEvents = []
-        for(const event of events){
-          gainEvents.push({ time: event.startTime, gain: event.gain, type: 'start' })
-          gainEvents.push({ time: event.endTime, gain: 0, type: 'end' })
-        }
-
-        // Sort gain events by time
-        gainEvents.sort((a, b) => a.time - b.time)
-
-        // Schedule frequency and gain changes
-        let activeNotes = 0
-        let currentGain = 0
-
-        for(const event of events){
-          // Set frequency at event start
-          o.frequency.setValueAtTime(event.freq, event.startTime)
-        }
-
-        // Schedule gain changes based on note overlaps
-        for(const gainEvent of gainEvents){
-          if(gainEvent.type === 'start'){
-            activeNotes++
-            if(activeNotes === 1){ // First note starting
-              g.gain.setValueAtTime(gainEvent.gain, gainEvent.time)
-              currentGain = gainEvent.gain
-            }
-          } else { // end
-            activeNotes--
-            if(activeNotes === 0){ // Last note ending
-              g.gain.setValueAtTime(0, gainEvent.time)
-              currentGain = 0
-            }
-          }
-        }
-
-        // Start and stop the oscillator
-        o.start(startTime)
-        o.stop(endTime)
-
-        o.onended = function(){
-          try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}
-        }
-      }catch(e){
-        console.warn('Failed to create voice oscillator:', e)
-      }
-    }
-
-    function playMeasure(tokens, bpm, keyAcc, waveType, gainOverride, anchorStart, timeSig){
-      if(!tokens || tokens.length===0) return
-      // schedule notes precisely using AudioContext time
-      const startNow = (typeof anchorStart === 'number') ? anchorStart : (AudioCtx.currentTime + 0.01)
-      let curTime = startNow
-      let i = 0
-      let measureDurOverride = null
-      const accState = {}
-
-      const isStaccatoDur = (d) => {
-        if(!d) return false
-        const dd = d.toLowerCase()
-        return dd === 'semiquaver' || dd === 'demisemiquaver' || dd === 'quaver' || dd === 'crotchet'
-      }
-      function scheduleOsc(startAt, freq, playDur, wave, gain){
-        try{
-          if(playbackState.stopRequested || playbackState.isPaused) return
-          const o = AudioCtx.createOscillator()
-          const g = AudioCtx.createGain()
-          o.type = wave
-          o.frequency.value = freq
-          g.gain.value = gain!==null? gain : 0.08
-          o.connect(g); g.connect(AudioCtx.destination)
-          playbackState.currentOscillators.push(o)
-          const startAtClamped = Math.max(startAt, AudioCtx.currentTime + 0.001)
-          o.start(startAtClamped)
-          o.stop(startAtClamped + playDur)
-          o.onended = function(){
-            try{ playbackState.currentOscillators = playbackState.currentOscillators.filter(x=>x!==o) }catch(e){}
-          }
-        }catch(e){}
-      }
-
-      while(i<tokens.length){
-        if(playbackState.stopRequested) break
-        const t = tokens[i]
-        if(!t){ i++; continue }
-        if(['semiquaverMeasure','quaverMeasure','minimMeasure','crochetMeasure','crotchetMeasure','demisemiquaverMeasure'].includes(t)){
-          measureDurOverride = t.replace('Measure','').toLowerCase(); i++; continue
-        }
-        if(t.toLowerCase() === 'rest'){
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          curTime += baseDur
-          i += isDurationToken(next)? 2 : 1
-          continue
-        }
-        if(['triplet','quintuplet','sextuplet','septuplet','octuplet','nontuplet','dectuplet','undectuplet','duodectuplet'].includes(t.toLowerCase())){
-          const tupletType = t.toLowerCase()
-          const base = tokens[i+1]
-          i += 2
-          if(tokens[i] === '-'){
-            i++
-            const group = []
-            while(i<tokens.length && tokens[i] !== '-') { group.push(tokens[i]); i++ }
-            if(tokens[i] === '-') i++
-            const baseDur = durToSec(base, bpm, timeSig)
-            let unitForTuplet = 'quaver'
-            if(tupletType === 'triplet'){
-              if(base.toLowerCase().startsWith('semiquaver')) unitForTuplet = 'quaver'
-              else if(base.toLowerCase().startsWith('quaver')) unitForTuplet = 'crochet'
-              else unitForTuplet = 'quaver'
-            } else if(tupletType === 'quintuplet'){
-              unitForTuplet = base
-            } else if(tupletType === 'septuplet'){
-              unitForTuplet = base
-            }
-            const scaledDur = durToSec(unitForTuplet, bpm, timeSig) / (tupletType === 'triplet' ? 3 : (tupletType === 'quintuplet' ? 5 : (tupletType === 'sextuplet' ? 6 : (tupletType === 'septuplet' ? 7 : (tupletType === 'octuplet' ? 8 : (tupletType === 'nontuplet' ? 9 : (tupletType === 'dectuplet' ? 10 : (tupletType === 'undectuplet' ? 11 : (tupletType === 'duodectuplet' ? 12 : 3)))))))))
-            for(const tok of group){
-              if(playbackState.stopRequested) break
-              if(tok.startsWith('[') && tok.endsWith(']')){
-                const pitches = tok.slice(1,-1).split(/\s+/).filter(Boolean)
-                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
-                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
-                for(const p of pitches){
-                  if(isNoteToken(p)){
-                    const freq = noteFreq(p, keyAcc, accState)
-                    scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
-                  }
-                }
-                curTime += scaledDur
-              } else if(isNoteToken(tok)){
-                const freq = noteFreq(tok, keyAcc, accState)
-                const staccatoRatio = (base === 'semiquaver' || base === 'demisemiquaver') ? 0.9 : 0.5
-                const playDur = isStaccatoDur(base) ? scaledDur * staccatoRatio : scaledDur
-                scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
-                curTime += scaledDur
-              } else if(tok.toLowerCase() === 'rest'){
-                curTime += scaledDur
-              }
-            }
-            continue
-          }
-        }
-        if(isNoteToken(t)){
-          let forceFull = false
-          if(tokens[i+1] === 's'){
-            forceFull = true
-            i++
-          }
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          if(isDurationToken(next)) i += 2; else i += 1
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
-          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
-          const freq = noteFreq(t, keyAcc, accState)
-          scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
-          curTime += baseDur
-          continue
-        }
-        if(t.startsWith('[') && t.endsWith(']')){
-          const pitches = t.slice(1,-1).split(/\s+/).filter(Boolean)
-          let forceFull = false
-          if(tokens[i+1] === 's'){
-            forceFull = true
-            i++
-          }
-          const next = tokens[i+1]
-          let durTok = isDurationToken(next)? next.toLowerCase() : (measureDurOverride || 'quaver')
-          if(isDurationToken(next)) i += 2; else i += 1
-          const baseDur = durToSec(durTok, bpm, timeSig)
-          const staccatoRatio = (durTok === 'semiquaver' || durTok === 'demisemiquaver') ? 0.9 : 0.5
-          const playDur = forceFull ? baseDur : (isStaccatoDur(durTok) ? baseDur * staccatoRatio : baseDur)
-          for(const p of pitches){
-            if(isNoteToken(p)){
-              const freq = noteFreq(p, keyAcc, accState)
-              scheduleOsc(curTime, freq, playDur, waveType, gainOverride)
-            }
-          }
-          curTime += baseDur
-          continue
-        }
-        i++
-      }
-    }
-
-    // Collect all note events for each voice instead of creating oscillators immediately
-    const voiceEvents = parsed.map(() => ({ events: [] }))
-
-    // schedule measures against a single advancing anchor so there is no extra gap between measures
-    let currentTime = AudioCtx.currentTime + 0.01
-    console.log('Starting scheduling at', currentTime)
-    for(let m=0;m<maxMeasures;m++){
-      console.log('Scheduling measure', m)
-      const durations = []
-      parsed.forEach((p, voiceIndex)=>{
-        const tokens = p.measures[m]? (p.measures[m].match(/(\[.*?\]|[^\s\[\]]+)/g) || []) : []
-        const bpm = p.parsed.bpm
-        const keyAcc = p.parsed.keyAcc
-        const wave = p.meta.wave
-        const volMult = (p.meta && typeof p.meta.volume === 'number') ? p.meta.volume : 1
-        let baseGain = 0.08
-        if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
-        const gain = baseGain * volMult
-        collectMeasureEvents(tokens, bpm, keyAcc, wave, gain, currentTime, p.parsed.timeSig, voiceEvents[voiceIndex].events)
-        const dur = calculateMeasureDuration(p.parsed.timeSig, p.parsed.bpm)
-        durations.push(dur)
-      })
-      const maxDur = Math.max(...durations)
-      console.log('Measure', m, 'maxDur', maxDur)
-      currentTime += maxDur
-    }
-
-    // Now create oscillators and schedule automation
-    const totalDuration = currentTime - (AudioCtx.currentTime + 0.01)
-    voiceEvents.forEach((voice, voiceIndex) => {
-      const p = parsed[voiceIndex]
-      const wave = p.meta.wave
-      const volMult = (p.meta && typeof p.meta.volume === 'number') ? p.meta.volume : 1
-      let baseGain = 0.08
-      if(p.meta.name && p.meta.name.toLowerCase().includes('melody')) baseGain = 0.18
-      const gain = baseGain * volMult
-
-      if(voice.events.length > 0) {
-        createVoiceOscillator(voice.events, wave, gain, totalDuration)
-      }
-    })
-
-    playbackState.isPlaying=false
-    console.log('Playback scheduled')
-  }
-
   // Add Multi-edit toggle into the Selection menu (provides multi-cursor support)
   try{
     const selMenu = document.getElementById('menu-selection')
@@ -1831,11 +733,6 @@
         item.setAttribute('data-action','toggleMultiEdit')
         item.textContent = 'Toggle Multi-edit'
         dd.appendChild(item)
-        const tidyItem = document.createElement('div')
-        tidyItem.className = 'item'
-        tidyItem.setAttribute('data-action','tidyEuph')
-        tidyItem.textContent = 'Tidy Euph Code'
-        dd.appendChild(tidyItem)
       }
     }
   }catch(e){ console.warn('add multi-edit menu failed', e) }
@@ -1864,41 +761,22 @@
   function deleteFile(name){
     if(!(name in files)) return
     // deletion confirmation is handled before calling this, but guard just in case
-    // if folder, delete all files in it
-    if(name.endsWith('/')){
-      const prefix = name
-      Object.keys(files).filter(k => k.startsWith(prefix)).forEach(k => {
-        delete files[k]
-        const ti = tabs.indexOf(k)
-        if(ti >= 0) tabs.splice(ti,1)
-        try{ delete buffers[k] }catch(e){}
-        try{
-          if(sessions[k]){
-            try{ if(typeof sessions[k].destroy === 'function') sessions[k].destroy() }catch(e){}
-            delete sessions[k]
-          }
-        }catch(e){}
-        try{ delete lastSaved[k] }catch(e){}
-        try{ delete gutterDecorations[k] }catch(e){}
-      })
-    }else{
-      // remove from files and tabs
-      delete files[name]
-      const ti = tabs.indexOf(name)
-      if(ti >= 0) tabs.splice(ti,1)
-      // clear any in-memory buffers/sessions/metadata for the deleted file
-      try{ delete buffers[name] }catch(e){}
-      try{
-        if(sessions[name]){
-          try{ if(typeof sessions[name].destroy === 'function') sessions[name].destroy() }catch(e){}
-          delete sessions[name]
-        }
-      }catch(e){}
-      try{ delete lastSaved[name] }catch(e){}
-      try{ delete gutterDecorations[name] }catch(e){}
-    }
-    if(active === name || (name.endsWith('/') && active && active.startsWith(name))){
-      active = tabs.length? tabs[0]: null
+    // remove from files and tabs
+    delete files[name]
+    const ti = tabs.indexOf(name)
+    if(ti >= 0) tabs.splice(ti,1)
+    // clear any in-memory buffers/sessions/metadata for the deleted file
+    try{ delete buffers[name] }catch(e){}
+    try{
+      if(sessions[name]){
+        try{ if(typeof sessions[name].destroy === 'function') sessions[name].destroy() }catch(e){}
+        delete sessions[name]
+      }
+    }catch(e){}
+    try{ delete lastSaved[name] }catch(e){}
+    try{ delete gutterDecorations[name] }catch(e){}
+    if(active === name){
+      active = tabs.length? tabs[Math.max(0,ti-1)]: null
       if(active && editor) openFile(active)
       else {
         // no active file -> clear editor and show placeholder
@@ -2007,23 +885,12 @@
     const session = getSessionFor(name)
     editor.setSession(session)
     editor.focus()
-    // refresh file list/tabs now that the editor session is attached so
-    // dirty indicators (which may rely on editor.getValue()) are accurate
-    try{ renderTabs(); renderFileList() }catch(e){}
     const filenameEl = document.getElementById('editor-filename')
     if(filenameEl) filenameEl.textContent = name
     // breadcrumb
-    try{ 
-      const bc = document.getElementById('editor-breadcrumb'); 
-      if(bc) {
-        const parts = name.split('/')
-        const crumb = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '/'
-        const filename = parts[parts.length - 1]
-        bc.innerHTML = '<span class="crumb">' + escapeHtml(crumb) + '</span> <span id="editor-filename">' + escapeHtml(filename) + '</span>'
-      }
-    }catch(e){}
+    try{ const bc = document.getElementById('editor-breadcrumb'); if(bc) bc.innerHTML = '<span class="crumb">/</span> <span id="editor-file-name-text" style="font-weight:600;color:var(--accent-2)">' + escapeHtml(name) + '</span>' }catch(e){}
     // update document title to reflect active file
-    try{ document.title = 'Nua Code Studio - ' + name }catch(e){}
+    try{ document.title = 'NuaCode - ' + name }catch(e){}
     updateStatus('Opened ' + name)
     // ensure bottom panel remains visible when switching files
     try{ const bp = document.getElementById('bottom-panel'); if(bp) bp.style.display = 'block' }catch(e){}
@@ -2035,8 +902,6 @@
     try{ const ph = document.getElementById('editor-placeholder'); if(ph) ph.style.display = 'none' }catch(e){}
     // persist last-opened tabs / active file
     try{ settings.lastTabs = tabs.slice(); settings.lastActive = active; saveSettings() }catch(e){}
-    // update Play menu visibility when opening a file
-    try{ if(typeof updatePlayMenuVisibility === 'function') updatePlayMenuVisibility() }catch(e){}
   }
 
   function closeTab(name){
@@ -2045,28 +910,14 @@
     const i = tabs.indexOf(name)
     if(i>=0) tabs.splice(i,1)
     if(name===active){
-      // Persist the current editor content for the file being closed so we
-      // don't accidentally overwrite another file's buffer when switching.
-      try{ if(editor) buffers[name] = editor.getValue() }catch(e){}
-      const next = tabs.length? tabs[Math.max(0,i-1)]: null
-      if(next) {
-        // Let openFile handle persisting previous active (it will see the
-        // correct `active` value) by calling it while `active` still points
-        // to the file being closed.
-        openFile(next)
-      } else {
-        // No next tab: clear active and the editor
-        active = null
-      }
+      active = tabs.length? tabs[Math.max(0,i-1)]: null
+      if(active) openFile(active)
     }
     renderTabs(); renderFileList();
     // persist last-opened tabs
     try{ settings.lastTabs = tabs.slice(); settings.lastActive = active; saveSettings() }catch(e){}
     // if no active file show placeholder
-    if(!active){ 
-      try{ if(editor) editor.setValue('', -1) }catch(e){}
-      try{ const ph = document.getElementById('editor-placeholder'); if(ph) ph.style.display = 'flex' }catch(e){}
-    }
+    if(!active){ try{ const ph = document.getElementById('editor-placeholder'); if(ph) ph.style.display = 'flex' }catch(e){} }
   }
 
   function createNewFile(){
@@ -2180,24 +1031,9 @@
   }
 
   function modeFor(name){
-    try{
-      const n = (name || '').toLowerCase()
-      if(n.endsWith('.js')) return 'ace/mode/javascript'
-      if(n.endsWith('.css')) return 'ace/mode/css'
-      if(n.endsWith('.json')) return 'ace/mode/json'
-      // provide sensible highlighting for .huph and .euph
-      if(n.endsWith('.huph') || n.endsWith('.euph')){
-        // if file content starts with JSON object, use JSON mode
-        try{
-          const txt = (buffers[name] !== undefined) ? buffers[name] : (files[name] || '')
-          if(txt && txt.trim().startsWith('{')) return 'ace/mode/json'
-        }catch(e){}
-        // fallback to custom euph mode if registered
-        if(euphModeInstance) return euphModeInstance
-        return 'ace/mode/markdown'
-      }
-      return 'ace/mode/html'
-    }catch(e){ return 'ace/mode/text' }
+    if(name.endsWith('.js')) return 'ace/mode/javascript'
+    if(name.endsWith('.css')) return 'ace/mode/css'
+    return 'ace/mode/html'
   }
 
   // Build preview by taking index.html (if present) and injecting css/js
@@ -2899,35 +1735,18 @@
     const menus = Array.from(document.querySelectorAll('.menu'))
     menus.forEach(m=>{
       m.addEventListener('click', (e)=>{
-        try{ e.stopPropagation() }catch(_){}
         // toggle open state on this menu
         const isOpen = m.classList.contains('open')
-        // close others and hide their dropdowns
-        menus.forEach(x=> { x.classList.remove('open'); const dd = x.querySelector('.dropdown'); if(dd) dd.style.display = '' })
-        if(!isOpen){
-          m.classList.add('open')
-          // position the dropdown using fixed positioning (robust to layout/transform)
-          const dropdown = m.querySelector('.dropdown')
-          if(dropdown){
-            try{
-              const rect = m.getBoundingClientRect()
-              dropdown.style.position = 'fixed'
-              dropdown.style.left = Math.max(8, rect.left) + 'px'
-              dropdown.style.top = (rect.top + rect.height) + 'px'
-              dropdown.style.zIndex = 20000
-              dropdown.style.display = 'block'
-            }catch(e){ /* ignore positioning failures */ }
-          }
-        }
+        // close others
+        menus.forEach(x=> x.classList.remove('open'))
+        if(!isOpen) m.classList.add('open')
       })
     })
 
-    // close dropdowns on outside click (ignore clicks inside dropdowns)
+    // close dropdowns on outside click
     document.addEventListener('click', (e)=>{
-      if(!e.target.closest('.menu') && !e.target.closest('.dropdown')){
+      if(!e.target.closest('.menu')){
         menus.forEach(x=> x.classList.remove('open'))
-        // also hide any dropdowns that were explicitly positioned
-        Array.from(document.querySelectorAll('.menu .dropdown')).forEach(d=> { d.style.display = '' })
       }
     })
 
@@ -2956,9 +1775,8 @@
       })
       // prevent default context menu and show our menu on right click
         document.addEventListener('contextmenu', (e)=>{
+          e.preventDefault()
           const target = e.target
-          // Always prevent browser menu so we show our custom menu
-          try{ e.preventDefault(); e.stopPropagation() }catch(_){}
           // store last context target name if over a file list item
           let filename = null
           const li = target.closest('#file-list li')
@@ -2966,13 +1784,13 @@
 
           // Prepare menu visibility for scope-based items
           const isFile = !!filename
-          const isProblems = !!target.closest('#console') || !!target.closest('#error-list')
+          const isProblems = !!target.closest('#problems') || !!target.closest('#error-list')
           Array.from(ctx.querySelectorAll('.ctx-item')).forEach(it=>{
             const scope = it.getAttribute('data-scope') || 'both'
             if(scope === 'both') it.style.display = ''
             else if(scope === 'file') it.style.display = isFile? '': 'none'
             else if(scope === 'global') it.style.display = isFile? 'none': ''
-            else if(scope === 'console') it.style.display = isProblems ? '' : 'none'
+            else if(scope === 'problems') it.style.display = isProblems ? '' : 'none'
           })
 
           // Temporarily show offscreen to measure size, then position so it doesn't overflow
@@ -2992,7 +1810,7 @@
 
           ctx.style.left = left + 'px'
           ctx.style.top = top + 'px'
-          ctx.dataset.target = filename || (isProblems ? 'console' : '')
+          ctx.dataset.target = filename || (isProblems ? 'problems' : '')
         })
       // hide context menu on any left-click outside
       document.addEventListener('mousedown', (e)=>{
@@ -3075,22 +1893,6 @@
         }catch(e){ console.error('toggleMultiEdit', e) }
         break
       }
-      case 'tidyEuph':{
-        try{
-          if(!active || !active.toLowerCase().endsWith('.euph')) { showDialog('Tidy','Only works on .euph files'); break }
-          const content = files[active] || ''
-          const lines = content.split('\n').map(l=>l.trim()).filter(Boolean)
-          if(lines.length === 0) break
-          const header = lines[0]
-          const measures = lines.slice(1).flatMap(line => line.split('|').map(m=>m.trim()).filter(Boolean))
-          const newContent = header + '\n' + measures.join(' |\n') + ' |'
-          files[active] = newContent
-          if(editor) editor.setValue(newContent, -1)
-          scheduleDirtyUpdate()
-          updateStatus('Euph code tidied')
-        }catch(e){ console.error('tidyEuph', e) }
-        break
-      }
       case 'save': saveCurrent(); break
       case 'saveall': saveAll(); break
       case 'rename':{
@@ -3130,19 +1932,16 @@
         try{ const li = Array.from(document.querySelectorAll('#file-list li')).find(l=> l.dataset && l.dataset.name === target); if(li) li.scrollIntoView({block:'center'}); }catch(e){}
         break }
       case 'copyErrors':{
-        // copy the current Console (Problems + Debug) to clipboard
+        // copy the current Problems list to clipboard
         const listText = (errors && errors.length>0) ? errors.map(e=>{
           const src = (e.source || '') + (e.line ? (':' + e.line) : '')
           if(e.kind === 'lint') return `${src} - ${e.message}`
           return `[${e.kind}] ${src} - ${e.message}`
         }).join('\n\n') : 'No problems'
 
-        const debugText = document.getElementById('debug-output').textContent
-        const fullText = listText + '\n\n--- Debug ---\n' + debugText
-
         if(navigator.clipboard && navigator.clipboard.writeText){
-          navigator.clipboard.writeText(fullText).then(()=> updateStatus('Console copied')) .catch(()=> { fallbackCopy(fullText) })
-        }else{ fallbackCopy(fullText) }
+          navigator.clipboard.writeText(listText).then(()=> updateStatus('Errors copied')) .catch(()=> { fallbackCopy(listText) })
+        }else{ fallbackCopy(listText) }
         break }
       case 'downloadAll':{
         // simple project export as JSON containing all files
@@ -3170,7 +1969,7 @@
         const target = ctx && ctx.dataset && ctx.dataset.target ? ctx.dataset.target : null
         if(target && target in files) openFile(target)
         break }
-      case 'toggleConsole':{
+      case 'toggleProblems':{
         const bp = document.getElementById('bottom-panel')
         if(bp) bp.style.display = (bp.style.display === 'block')? 'none':'block'
         break }
@@ -3184,7 +1983,6 @@
           try{
             const cur = editor.getValue()
             let out = cur
-            // HTML/CSS/JS use js-beautify when available
             if(active.endsWith('.html')){
               if(typeof html_beautify !== 'undefined') out = html_beautify(cur, {indent_size:2})
               else if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
@@ -3193,22 +1991,6 @@
               else if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
             }else if(active.endsWith('.js')){
               if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
-            }else if(active.endsWith('.json')){
-              // Use forgiving parser then stringify for consistent JSON formatting
-              try{
-                const parsed = safeJsonParse(cur)
-                out = JSON.stringify(parsed, null, 2) + '\n'
-              }catch(e){
-                if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2})
-                else throw e
-              }
-            }else if(active.endsWith('.huph')){
-              // .huph can be either JSON or simple-line format; if JSON-like, tidy JSON
-              const trimmed = cur.trim()
-              if(trimmed.startsWith('{')){
-                try{ const parsed = JSON.parse(trimmed); out = JSON.stringify(parsed, null, 2) + '\n' }catch(e){ if(typeof js_beautify !== 'undefined') out = js_beautify(cur, {indent_size:2}) }
-              }
-              // otherwise leave .huph as-is (it's a simple list format)
             }
             files[active] = out
             editor.setValue(out, -1)
@@ -3627,8 +2409,6 @@
     loadFromStorage()
     // load UI settings (including autosave) and apply them
     try{ loadSettings(); applySettings() }catch(e){}
-    // restore collapsed folder state if present in settings
-    try{ if(settings && settings.collapsedFolders) collapsedFolders = Object.assign({}, settings.collapsedFolders) }catch(e){}
     renderFileList()
     // restore previously opened tabs if present; otherwise start with no file open
     try{
@@ -3668,27 +2448,12 @@
     // events
     newBtn.onclick = createNewFile
     saveBtn.onclick = saveCurrent
-    newFolderBtn.onclick = startCreateFolder
-
-    // allow dropping files to the root of the file list to move them out of folders
-    try{
-      const root = document.getElementById('file-list')
-      if(root){
-        root.addEventListener('drop', (e)=>{
-          e.preventDefault()
-          const dragged = e.dataTransfer.getData('text/plain')
-          if(!dragged || !(dragged in files)) return
-          if(files[dragged] === '__folder__'){
-            moveFolder(dragged, '')
-          }else{
-            const fileName = dragged.split('/').pop()
-            // move to root; avoid overwrite
-            moveFile(dragged, getAvailablePath(fileName))
-          }
-        })
-        root.addEventListener('dragover', (e)=> e.preventDefault())
-      }
-    }catch(e){}
+    runBtn.onclick = runPreview
+    if(stopBtn) stopBtn.onclick = stopPreview
+    togglePreviewBtn.onclick = ()=>{
+      const pc = document.getElementById('preview-container')
+      pc.style.display = pc.style.display === 'none' ? 'block' : 'none'
+    }
 
     // placeholder click -> create new file
     try{
@@ -3745,7 +2510,9 @@
     const bottomPanel = document.getElementById('bottom-panel')
     // restore saved bottom panel height if available
     try{ const h = localStorage.getItem('mini_vsc_bottom_height'); if(h && bottomPanel) bottomPanel.style.height = h }catch(e){}
-    const toggleConsole = document.getElementById('toggle-console')
+    const errorList = document.getElementById('error-list')
+    const clearBtn = document.getElementById('clear-errors')
+    const toggleErrors = document.getElementById('toggle-errors')
     const bottomTabs = Array.from(document.querySelectorAll('.bottom-tab'))
     const terminalOutput = document.getElementById('terminal-output')
     const terminalLine = document.getElementById('terminal-line')
@@ -3754,16 +2521,10 @@
     // called from runLint() and other places. The top-level implementation
     // queries DOM elements on each call.
 
-    // wire Clear Errors button (if present)
-    try{
-      const clearBtnEl = document.getElementById('clear-errors')
-      if(clearBtnEl) clearBtnEl.onclick = ()=>{ errors = []; renderErrors(); const out = document.getElementById('debug-output'); if(out) out.textContent = '' }
-    }catch(e){}
-    if(toggleConsole){
-      toggleConsole.onclick = ()=>{
-        if(bottomPanel.style.display === 'block'){ bottomPanel.style.display = 'none' }
-        else { bottomPanel.style.display = 'block' }
-      }
+    clearBtn.onclick = ()=>{ errors = []; renderErrors() }
+    toggleErrors.onclick = ()=>{
+      if(bottomPanel.style.display === 'block'){ bottomPanel.style.display = 'none' }
+      else { bottomPanel.style.display = 'block' }
     }
 
     // bottom tab switching
@@ -4048,16 +2809,6 @@
   }
   ensureAceLoaded(()=>{
     setupEditor()
-    // override console.log to capture to debug panel
-    const originalLog = console.log
-    console.log = function(...args){
-      originalLog.apply(console, args)
-      const debugOutput = document.getElementById('debug-output')
-      if(debugOutput){
-        debugOutput.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ') + '\n'
-        debugOutput.scrollTop = debugOutput.scrollHeight
-      }
-    }
     // apply persisted UI settings once editor exists
     try{ applySettings() }catch(e){}
     init()
@@ -4100,6 +2851,6 @@
   })
 
   // expose for debug
-  window.miniVSC = { files, openFile, saveCurrent }
+  window.miniVSC = { files, openFile, saveCurrent, runPreview }
 
 })();
